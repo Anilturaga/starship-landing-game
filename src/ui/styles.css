@@ -13,6 +13,7 @@
   --inset-l: max(22px, calc(env(safe-area-inset-left, 0px) + 16px));
   --inset-r: max(22px, calc(env(safe-area-inset-right, 0px) + 16px));
   --inset-b: calc(env(safe-area-inset-bottom, 0px) + 30px);
+  --thr-h: 188px;
   color-scheme: dark;
 }
 * { box-sizing: border-box; }
@@ -26,22 +27,21 @@ button:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
 .vig.on { opacity: 1; }
 .lbl { font-family: var(--fc); font-size: 10.5px; letter-spacing: 0.2em; color: var(--dim); text-transform: uppercase; }
 
-/* telemetry: dials and velocity left, approach radar centre, the Ship and its engines right.
-   On a portrait phone the radar drops below the Ship, leaving the middle of the view clear. */
+/* telemetry: dials and velocity top left, the Ship and its engines top right, and the approach radar at the
+   bottom centre between the thumbs, where the eyes are while landing. The middle of the view stays clear. */
 .top {
   position: fixed; top: 0; left: 0; right: 0; pointer-events: none;
-  display: grid; grid-template-columns: 1fr auto 1fr; grid-template-areas: 'l r s'; align-items: start; gap: 8px 12px;
+  display: grid; grid-template-columns: 1fr auto; grid-template-areas: 'l s'; align-items: start; gap: 8px 12px;
   padding: calc(env(safe-area-inset-top, 0px) + 10px) max(16px, env(safe-area-inset-right, 0px)) 24px max(16px, env(safe-area-inset-left, 0px));
   background: linear-gradient(rgba(0, 0, 0, 0.45), rgba(0, 0, 0, 0));
   font-variant-numeric: tabular-nums;
 }
 .left { grid-area: l; display: flex; flex-direction: column; gap: 6px; }
 .right { grid-area: s; justify-self: end; display: flex; gap: 8px; align-items: flex-start; }
-.radar { grid-area: r; }
-@media (orientation: portrait) {
-  .top { grid-template-columns: 1fr auto; grid-template-areas: 'l s' '. r'; }
-  .radar { justify-self: end; margin-top: -4px; }
-}
+.radar { position: fixed; left: calc((var(--inset-l) + 128px + 100vw - var(--inset-r) - 52px) / 2); transform: translateX(-50%); bottom: calc(var(--inset-b) - 8px); }
+@media (max-width: 380px) { .radar svg { width: 80px; height: 80px; } .rcap { flex-direction: column; align-items: center; gap: 0; } }
+/* landscape: the middle of the screen is where the Ship is, so the radar sits beside the throttle */
+@media (orientation: landscape) { .radar { left: auto; transform: none; right: calc(var(--inset-r) + 52px + 34px); } }
 .grow { display: flex; gap: 6px; }
 .gauge { position: relative; width: 64px; height: 64px; }
 .gauge svg { position: absolute; inset: 0; width: 100%; height: 100%; }
@@ -95,7 +95,7 @@ button:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
 .knob { position: absolute; left: 50%; top: 50%; width: 48px; height: 48px; margin: -24px 0 0 -24px; border-radius: 50%; background: rgba(243, 245, 247, 0.88); box-shadow: 0 2px 10px rgba(0, 0, 0, 0.6); z-index: 1; }
 .stick .cap { position: absolute; left: -20px; right: -20px; top: -20px; text-align: center; }
 .ghost { position: absolute; left: 50%; top: 50%; width: 60px; height: 60px; margin: -30px 0 0 -30px; border-radius: 50%; border: 2px solid var(--guide); pointer-events: none; transition: transform 0.3s ease-out; z-index: 2; }
-.thr { position: fixed; right: var(--inset-r); bottom: var(--inset-b); width: 52px; height: 188px; border: 1px solid var(--line); border-radius: 4px; background: rgba(0, 0, 0, 0.28); touch-action: none; }
+.thr { position: fixed; right: var(--inset-r); bottom: var(--inset-b); width: 52px; height: var(--thr-h); border: 1px solid var(--line); border-radius: 4px; background: rgba(0, 0, 0, 0.28); touch-action: none; }
 .thr.auto { opacity: 0.55; }
 .thr .fill { position: absolute; left: 3px; right: 3px; bottom: 3px; background: linear-gradient(to top, rgba(255, 178, 74, 0.95), rgba(255, 226, 170, 0.95)); border-radius: 2px; }
 .thr .z { position: absolute; left: -1px; right: -1px; height: 0; border-top: 1px dashed rgba(255, 255, 255, 0.45); }
@@ -110,22 +110,29 @@ button:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
 .scope .sk { width: 10px; height: 10px; margin: -5px 0 0 -5px; background: var(--fg); }
 .scope .sg { width: 22px; height: 22px; margin: -11px 0 0 -11px; border: 2px solid var(--guide); transition: transform 0.3s ease-out; }
 .scope.ok .sg { background: rgba(159, 228, 255, 0.35); }
-.tcue { position: fixed; right: var(--inset-r); bottom: calc(var(--inset-b) + 188px + 52px); width: 52px; text-align: center; font-size: 15px; line-height: 1; color: var(--guide); pointer-events: none; }
+.tcue { position: fixed; right: var(--inset-r); bottom: calc(var(--inset-b) + var(--thr-h) + 52px); width: 52px; text-align: center; font-size: 15px; line-height: 1; color: var(--guide); pointer-events: none; }
 .abort .ghost, .abort .sg, .tghost.abort { border-color: var(--bad) !important; }
 .tcue.abort { color: var(--bad); }
-.chips { position: fixed; left: 50%; transform: translateX(-50%); bottom: var(--inset-b); display: flex; gap: 6px; }
+.chips { position: fixed; left: 50%; transform: translateX(-50%); top: calc(env(safe-area-inset-top, 0px) + 12px); display: flex; gap: 6px; }
 .chip { display: flex; justify-content: space-between; gap: 8px; font-family: var(--fc); font-size: 11.5px; letter-spacing: 0.16em; border: 1px solid var(--line); background: var(--glass); color: var(--dim); padding: 8px 10px; border-radius: 3px; cursor: pointer; text-transform: uppercase; white-space: nowrap; }
 .chip { align-items: center; }
 .chip b { color: var(--fg); font-weight: 600; }
+/* portrait: the view buttons stack on the right, above the throttle, clear of both thumbs */
+@media (orientation: portrait) {
+  .chips { left: auto; right: var(--inset-r); top: auto; transform: none; bottom: calc(var(--inset-b) + var(--thr-h) + 92px); flex-direction: column; }
+  .chip { flex-direction: column; justify-content: center; gap: 3px; width: 52px; padding: 7px 0; font-size: 9.5px; letter-spacing: 0.1em; }
+}
+/* short landscape screens: a shorter throttle, so its label clears the Ship gauge */
+@media (orientation: landscape) and (max-height: 500px) { :root { --thr-h: 140px; } }
 .mode b, .go { display: inline-flex; align-items: center; gap: 8px; }
 .tcue { display: flex; justify-content: center; font-size: 18px; }
-.callout { position: fixed; left: 50%; transform: translateX(-50%); top: calc(env(safe-area-inset-top, 0px) + 136px); width: max-content; max-width: min(44vw, 440px); display: flex; align-items: flex-start; gap: 9px; padding: 8px 12px; background: var(--glass); border: 1px solid var(--bad); font-size: 13.5px; line-height: 1.35; pointer-events: none; }
+.callout { position: fixed; left: 50%; transform: translateX(-50%); top: calc(env(safe-area-inset-top, 0px) + 66px); width: max-content; max-width: min(44vw, 440px); display: flex; align-items: flex-start; gap: 9px; padding: 8px 12px; background: var(--glass); border: 1px solid var(--bad); font-size: 13.5px; line-height: 1.35; pointer-events: none; }
 .callout .ico { flex: none; color: var(--bad); }
 .callout small { display: block; color: var(--dim); font-size: 11px; margin-top: 2px; }
 .hint { position: fixed; left: 50%; top: 38%; transform: translateX(-50%); font-size: 12px; letter-spacing: 0.1em; background: var(--glass); border: 1px solid var(--line); padding: 7px 12px; pointer-events: none; transition: opacity 0.6s; white-space: nowrap; }
 .hint.off { opacity: 0; }
 @media (max-width: 680px) {
-  .callout { top: auto; bottom: calc(var(--inset-b) + 256px); max-width: calc(100vw - 32px); }
+  .callout { top: calc(env(safe-area-inset-top, 0px) + 170px); bottom: auto; max-width: calc(100vw - 32px); }
 }
 
 /* cards */
