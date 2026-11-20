@@ -1,4 +1,4 @@
-# Catch the Ship: design
+# Design
 
 A browser game about bringing Starship's upper stage ("Ship", V3) back from a belly-flop descent and setting it into the launch tower's catch arms. The goal is to feel like the real vehicle: realistic mass, thrust and propellant, the real control surfaces, and a flight computer that helps without flying for you.
 
@@ -110,7 +110,7 @@ The approach distance matters. The flip carries the Ship forward and braking tak
 - **Abort:** a short red tag, and the cues turn red.
 
 **Tests** (`tests/flight.test.ts`, `tests/pilot.ts`). A simulated player flies whole descents. It sees each cue 0.45 s late, moves its thumb with a 0.25 s lag, and has hand tremor.
-- **Catches:** it must catch the Ship in every one of 10 seeded runs in both Cadet and Pilot. A perfect follower must also catch.
+- **Catches:** it must land the Ship in the arms in every one of 10 seeded runs in both Cadet and Pilot. A perfect follower must also land it.
 - **Cues:** every cue must stay inside the stick's travel.
 - **Aborts:** the two abort scenarios must end in the ocean and on open ground.
 - **Slower player:** tuning used a slower, shakier player too (0.7 s, double tremor), which still catches about two times in three.

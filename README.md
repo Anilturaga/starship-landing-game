@@ -1,4 +1,4 @@
-# Catch the Ship
+# starship-landing-game
 
 A browser game about flying Starship's upper stage back to the launch tower: belly-flop through the air, flip upright on the Raptors, and settle the Ship into the catch arms before the propellant runs out. It is built for phones first, and also works with a keyboard.
 
@@ -20,7 +20,7 @@ Open the printed URL. Add `?debug` to expose the game store as `window.game` for
 npm test
 ```
 
-The tests fly complete descents headlessly. One pilot does exactly what the flight computer's cues say: it must catch the Ship in Cadet and Pilot modes, and abort safely (to the ocean, or clear of the tower) when a catch is impossible.
+The tests fly complete descents headlessly. One pilot does exactly what the flight computer's cues say: it must land the Ship in the tower's arms in Cadet and Pilot modes, and abort safely (to the ocean, or clear of the tower) when that is impossible.
 
 ```bash
 npm run build

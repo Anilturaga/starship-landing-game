@@ -9,7 +9,7 @@ export function Menu() {
   const start = useGame((s) => s.start);
   return (
     <div className="card" role="dialog" aria-labelledby="menu-title">
-      <h1 id="menu-title">Catch the Ship</h1>
+      <h1 id="menu-title">Starship Landing Game</h1>
       <p>Bring Ship down from 2.6 km and set it into the tower's arms before the propellant runs out.</p>
       <div className="modes">
         {(Object.keys(MODES) as ModeId[]).map((id) => {
