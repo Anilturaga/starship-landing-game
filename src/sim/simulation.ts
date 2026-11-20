@@ -1,0 +1,107 @@
+import { ARM_Y, CATCH, STEP } from './constants';
+import { createGuide, updateGuide, type Guide } from './guidance';
+import type { Mode } from './modes';
+import { checkContact, pinPos, type Outcome } from './outcome';
+import { createShip, physStep, type ShipState } from './physics';
+import { Vector3 } from 'three';
+
+const GUIDE_PERIOD = 0.2; // s of sim time between flight-computer updates
+export const SPEEDS = [1, 0.5, 0.25] as const;
+
+/**
+ * Owns one flight: fixed-step physics, the flight computer, contact checks and game speed.
+ * Rendering and UI read from it; they never change the physics directly.
+ */
+export class Simulation {
+  readonly mode: Mode;
+  ship: ShipState;
+  guide: Guide = createGuide();
+  outcome: Outcome | null = null;
+  running = false;
+
+  /** Manual speed choice index into SPEEDS. */
+  speedIndex = 0;
+  /** The player touched the speed control this flight, so auto slow-mo stays off. */
+  speedTouched = false;
+  autoSlow = false;
+  timeScale = 1;
+
+  private acc = 0;
+  private guideClock = 0;
+  private prevPinY = Infinity;
+  private pin = new Vector3();
+
+  constructor(mode: Mode) {
+    this.mode = mode;
+    this.ship = createShip(mode.propellant);
+    this.prevPinY = pinPos(this.ship, this.pin).y;
+  }
+
+  /** Throttle the player asks for; ignored when the flight computer owns the throttle. */
+  setThrottle(v: number) {
+    if (!this.mode.autoThrottle) this.ship.thr = Math.min(1, Math.max(0, v));
+  }
+  setStick(x: number, y: number) {
+    this.ship.inp.x = Math.max(-1, Math.min(1, x));
+    this.ship.inp.y = Math.max(-1, Math.min(1, y));
+  }
+  cycleSpeed() {
+    this.speedIndex = (this.speedIndex + 1) % SPEEDS.length;
+    this.speedTouched = true;
+  }
+
+  /** One fixed physics step plus contact checks and (periodically) the flight computer. */
+  step() {
+    if (this.outcome) return;
+    const s = this.ship;
+    physStep(s, STEP, { fbw: this.mode.fbw, wind: this.mode.wind });
+    if (s.prop <= 0) s.thr = 0;
+    const out = checkContact(s, this.prevPinY, this.mode.limits);
+    this.prevPinY = pinPos(s, this.pin).y;
+    if (out) {
+      this.outcome = out;
+      s.thr = 0;
+      if (out.kind === 'caught') {
+        s.pos.y += ARM_Y - this.pin.y; // rest the pins on the arms
+      }
+      s.vel.set(0, 0, 0);
+      s.w.set(0, 0, 0);
+      return;
+    }
+    this.guideClock += STEP;
+    if (this.guideClock >= GUIDE_PERIOD) {
+      this.guideClock = 0;
+      this.runGuide();
+    }
+  }
+
+  /** Runs the flight computer now. Also drives the throttle in modes where it owns it. */
+  runGuide() {
+    const needed = this.mode.guides || this.mode.autoThrottle;
+    if (!needed) return;
+    updateGuide(this.ship, this.guide, this.mode.fbw);
+    if (this.mode.autoThrottle) this.ship.thr = this.guide.throttle ?? 0;
+  }
+
+  /** Advance by real elapsed time (seconds), honouring slow motion. */
+  update(realDt: number) {
+    const dt = Math.min(0.1, realDt);
+    this.updateTimeScale(dt);
+    if (!this.running || this.outcome) { this.acc = 0; return; }
+    this.acc += dt * this.timeScale;
+    while (this.acc >= STEP && !this.outcome) {
+      this.step();
+      this.acc -= STEP;
+    }
+  }
+
+  private updateTimeScale(dt: number) {
+    const s = this.ship;
+    const pin = pinPos(s, this.pin);
+    const dTower = Math.hypot(pin.x - CATCH.x, pin.z - CATCH.z);
+    this.autoSlow = this.mode.autoSlowMo && !this.speedTouched && this.guide.upright && !this.guide.abort
+      && pin.y - ARM_Y < 220 && dTower < 90 && !this.outcome;
+    const want = this.autoSlow ? 0.5 : SPEEDS[this.speedIndex];
+    this.timeScale += (want - this.timeScale) * Math.min(1, dt * 3);
+  }
+}
