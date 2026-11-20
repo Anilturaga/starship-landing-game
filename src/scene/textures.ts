@@ -78,6 +78,51 @@ export const waterNormals = () =>
     x.putImageData(img, 0, 0);
   }, { repeat: [500, 500] });
 
+/** Tileable multi-octave value noise, for ground detail close to the camera. */
+export const detailNoise = () =>
+  canvasTexture(512, 512, (x, w, h) => {
+    const img = x.createImageData(w, h);
+    const grid = (n: number) => Array.from({ length: n * n }, () => Math.random());
+    const octs = [8, 16, 32, 64, 128].map((n) => ({ n, g: grid(n) }));
+    const smooth = (t: number) => t * t * (3 - 2 * t);
+    for (let j = 0; j < h; j++) {
+      for (let i = 0; i < w; i++) {
+        let v = 0, a = 0.5, tot = 0;
+        for (const { n, g } of octs) {
+          const fx = (i / w) * n, fy = (j / h) * n, x0 = Math.floor(fx), y0 = Math.floor(fy);
+          const tx = smooth(fx - x0), ty = smooth(fy - y0);
+          const at = (cx: number, cy: number) => g[((cy % n) * n) + (cx % n)];
+          const top = at(x0, y0) * (1 - tx) + at(x0 + 1, y0) * tx, bot = at(x0, y0 + 1) * (1 - tx) + at(x0 + 1, y0 + 1) * tx;
+          v += (top * (1 - ty) + bot * ty) * a; tot += a; a *= 0.6;
+        }
+        const c = (v / tot) * 255, o = (j * w + i) * 4;
+        img.data[o] = img.data[o + 1] = img.data[o + 2] = c;
+        img.data[o + 3] = 255;
+      }
+    }
+    x.putImageData(img, 0, 0);
+  });
+
+/** Wispy high cirrus: streaks of stretched noise with soft alpha. */
+export const cirrusTexture = () =>
+  canvasTexture(1024, 1024, (x, w, h) => {
+    x.clearRect(0, 0, w, h); // white wisps, the strength is in alpha
+    for (let k = 0; k < 45; k++) {
+      const cx = Math.random() * w, cy = Math.random() * h, len = 120 + Math.random() * 380, ang = -0.5 + Math.random() * 0.35;
+      for (let s = 0; s < 40; s++) {
+        const t = s / 40, px = cx + Math.cos(ang) * len * t + Math.sin(t * 9 + k) * 8, py = cy + Math.sin(ang) * len * t + Math.cos(t * 7) * 5;
+        const r = 6 + 22 * Math.sin(t * Math.PI) * Math.random();
+        for (const [ox, oy] of [[0, 0], [-w, 0], [w, 0], [0, -h], [0, h]]) {
+          const g = x.createRadialGradient(px + ox, py + oy, 0, px + ox, py + oy, r);
+          g.addColorStop(0, `rgba(255,255,255,${0.05 + Math.random() * 0.07})`);
+          g.addColorStop(1, 'rgba(255,255,255,0)');
+          x.fillStyle = g;
+          x.fillRect(px + ox - r, py + oy - r, r * 2, r * 2);
+        }
+      }
+    }
+  });
+
 /** Soft radial glow for engine bloom and explosions. */
 export const glowTexture = () =>
   canvasTexture(128, 128, (x, w) => {

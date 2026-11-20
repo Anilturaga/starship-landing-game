@@ -41,9 +41,9 @@ export const CATCH = { x: 14, z: 0 }; // catch axis between the arms
 export const TOWER = { x: -7, width: 12, height: 146 };
 export const ARM_REACH = { x0: -1, x1: 25, halfGap: 5.9 };
 export const MOUNT = { radius: 11, top: 27 };
-/** The real Boca Chica shoreline (from the USGS imagery, see scripts/terrain.py): x = SHORE_X + SHORE_SLOPE · z. */
-export const SHORE_X = 720;
-export const SHORE_SLOPE = 0.0776;
+/** The real Boca Chica shoreline (from USGS lidar, see scripts/terrain.py): x = SHORE_X + SHORE_SLOPE · z. */
+export const SHORE_X = 394;
+export const SHORE_SLOPE = 0.234;
 export const shoreX = (z: number) => SHORE_X + SHORE_SLOPE * z;
 
 // Simulation

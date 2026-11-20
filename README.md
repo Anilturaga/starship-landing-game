@@ -34,7 +34,7 @@ npm run build:html
 
 The output is `dist-html/index.html`.
 
-The ground textures come from USGS aerial imagery (public domain). To rebuild them:
+The ground comes from USGS data, all public domain: NAIP aerial imagery and 3DEP lidar elevation. To rebuild it:
 
 ```bash
 python3 scripts/terrain.py

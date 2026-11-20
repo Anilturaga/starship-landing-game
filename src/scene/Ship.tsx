@@ -69,7 +69,7 @@ function flapGeometry(len: number, w: number) {
 /** Procedural V3 Ship: steel leeward side, black tiled belly, four flaps, 3 sea-level + 3 vacuum Raptors. */
 function buildShip(): ShipParts {
   const root = new Group();
-  const steel = new MeshStandardMaterial({ color: 0xc4c9ce, metalness: 1, roughness: 0.6, roughnessMap: steelRoughness(), envMapIntensity: 0.7 });
+  const steel = new MeshStandardMaterial({ color: 0xc9c9c6, metalness: 0.6, roughness: 0.55, roughnessMap: steelRoughness(), envMapIntensity: 0.3 });
   const tiles = new MeshStandardMaterial({ map: tileTexture(), metalness: 0.05, roughness: 0.82 });
   const dark = new MeshStandardMaterial({ color: 0x1b1c1f, metalness: 0.15, roughness: 0.8, side: DoubleSide });
   const pinMat = new MeshStandardMaterial({ color: 0x8d9298, metalness: 0.75, roughness: 0.4 });

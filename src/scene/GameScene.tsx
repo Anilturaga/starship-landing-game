@@ -67,10 +67,10 @@ export function GameScene() {
       camera={{ fov: 50, near: 0.05, far: 80000, position: [600, 2600, -100] }}
     >
       <SimDriver />
-      <fogExp2 attach="fog" args={[fog, 0.000085]} />
+      <fogExp2 attach="fog" args={[fog, 0.00005]} />
       <Sky />
       <Sun />
-      <hemisphereLight args={[0xbcd4f0, 0x4d4636, 0.35 / EXPOSURE]} />
+      <hemisphereLight args={[0xd6e2f0, 0x5a5242, 0.3 / EXPOSURE]} />
       <Suspense fallback={null}>
         <World />
       </Suspense>

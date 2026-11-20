@@ -37,7 +37,7 @@ export function Menu() {
           <kbd>C</kbd> camera · <kbd>T</kbd> slow motion · <kbd>R</kbd> restart · <kbd>Esc</kbd> menu
         </div>
       </details>
-      <p className="credit">Ground imagery: USGS National Map (public domain).</p>
+      <p className="credit">Ground imagery and elevation: USGS The National Map (public domain).</p>
     </div>
   );
 }

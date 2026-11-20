@@ -1,149 +1,265 @@
 """
-Builds the ground textures from USGS aerial imagery (public domain, USGS National Map, USGSImageryOnly).
+Builds the ground from USGS data (all public domain, USGS The National Map):
+
+  - NAIP Plus orthoimagery (imagery.nationalmap.gov), up to 0.3 m per pixel, 2024-25
+  - USGSImageryOnly tiles (basemap.nationalmap.gov) for the wide 35 km view
+  - 3DEP lidar elevation (elevation.nationalmap.gov) for the dunes
 
   python3 scripts/terrain.py
 
-Writes src/assets/terrain-near.jpg, terrain-far.jpg, terrain-rough.png (sea = glossy) and terrain.json
-(extents in game metres: x east, z south, origin 5.5 m east of the tower base, as in src/sim/constants.ts).
+Writes src/assets/terrain-*.jpg|png and terrain.json. Game coordinates: x east, z south, metres,
+origin such that the tower base is at (TOWER_GAME_X, 0) as in src/sim/constants.ts.
 """
 import io, json, math, os, sys, urllib.request
+import numpy as np
 from PIL import Image, ImageFilter
 
-TOWER = (25.99689, -97.15705)  # tower base, read off the imagery
+TOWER = (25.996127, -97.154742)  # Pad A tower base, from the NAIP imagery (tower shadow and relief displacement)
 TOWER_GAME_X = -7
-URL = "https://basemap.nationalmap.gov/arcgis/rest/services/USGSImageryOnly/MapServer/tile/{z}/{y}/{x}"
+PAD, MID, NEAR = 600, 2000, 6000  # patch sizes, m (square, centred on the tower)
 OUT = os.path.join(os.path.dirname(__file__), "..", "src", "assets")
 CACHE = os.environ.get("TILE_CACHE", "/tmp/usgs-tiles")
+UA = {"User-Agent": "starship-landing-game terrain script"}
+R = 6378137
+K = 1 / math.cos(math.radians(TOWER[0]))  # Web Mercator scale at this latitude
+TX = math.radians(TOWER[1]) * R
+TY = math.log(math.tan(math.pi / 4 + math.radians(TOWER[0]) / 2)) * R
 
 
-def gpx(lat, lon, z):
-    n = 2 ** z * 256
-    return (lon + 180) / 360 * n, (1 - math.log(math.tan(math.radians(lat)) + 1 / math.cos(math.radians(lat))) / math.pi) / 2 * n
-
-
-def tile(z, x, y):
+def get(url, name):
     os.makedirs(CACHE, exist_ok=True)
-    f = os.path.join(CACHE, f"{z}_{x}_{y}.jpg")
+    f = os.path.join(CACHE, name)
     if not os.path.exists(f):
-        req = urllib.request.Request(URL.format(z=z, x=x, y=y), headers={"User-Agent": "starship-landing-game terrain script"})
-        open(f, "wb").write(urllib.request.urlopen(req, timeout=60).read())
-    return Image.open(f).convert("RGB")
+        open(f, "wb").write(urllib.request.urlopen(urllib.request.Request(url, headers=UA), timeout=180).read())
+        print("fetched", name, file=sys.stderr)
+    return f
 
 
-def mosaic(z, size_px):
-    """Square image of size_px centred on the tower, plus its metres-per-pixel."""
-    cx, cy = gpx(*TOWER, z)
+def bbox(size):
+    h = size / 2 * K
+    return f"{TX - h},{TY - h},{TX + h},{TY + h}"
+
+
+def naip(size, px):
+    u = ("https://imagery.nationalmap.gov/arcgis/rest/services/USGSNAIPPlus/ImageServer/exportImage"
+         f"?bbox={bbox(size)}&bboxSR=3857&imageSR=3857&size={px},{px}&format=jpg&f=image")
+    return Image.open(get(u, f"naip_{TOWER[0]}_{TOWER[1]}_{size}_{px}.jpg")).convert("RGB")
+
+
+def dem(size, px):
+    u = ("https://elevation.nationalmap.gov/arcgis/rest/services/3DEPElevation/ImageServer/exportImage"
+         f"?bbox={bbox(size)}&bboxSR=3857&imageSR=3857&size={px},{px}&format=tiff&pixelType=F32"
+         "&interpolation=RSP_BilinearInterpolation&f=image")
+    return np.array(Image.open(get(u, f"dem_{TOWER[0]}_{TOWER[1]}_{size}_{px}.tif")), dtype=np.float32)
+
+
+def basemap(z, size_px):
+    """Square mosaic of USGSImageryOnly tiles centred on the tower, and its metres per pixel."""
+    n = 2 ** z * 256
+    cx = (TOWER[1] + 180) / 360 * n
+    cy = (1 - math.log(math.tan(math.radians(TOWER[0])) + 1 / math.cos(math.radians(TOWER[0]))) / math.pi) / 2 * n
     x0, y0 = cx - size_px / 2, cy - size_px / 2
     im = Image.new("RGB", (size_px, size_px))
     for ty in range(int(y0 // 256), int((y0 + size_px) // 256) + 1):
         for tx in range(int(x0 // 256), int((x0 + size_px) // 256) + 1):
-            im.paste(tile(z, tx, ty), (int(tx * 256 - x0), int(ty * 256 - y0)))
-        print(f"z{z} row {ty}", file=sys.stderr)
-    mpp = 156543.03392 * math.cos(math.radians(TOWER[0])) / 2 ** z
-    return im, mpp
+            u = f"https://basemap.nationalmap.gov/arcgis/rest/services/USGSImageryOnly/MapServer/tile/{z}/{ty}/{tx}"
+            im.paste(Image.open(get(u, f"{z}_{tx}_{ty}.jpg")).convert("RGB"), (int(tx * 256 - x0), int(ty * 256 - y0)))
+    return im, 156543.03392 / K / 2 ** z
+
+
+def to_px(im, size, x, z):
+    """Game (x, z) to pixel in a patch of `size` metres centred on the tower."""
+    s = im.size[0] / size
+    return (x - TOWER_GAME_X) * s + im.size[0] / 2, z * s + im.size[1] / 2
+
+
+def fill(im, hole):
+    """Fills masked pixels (hole: bool array) by normalised convolution at growing radii, then adds grain."""
+    a = np.asarray(im, dtype=np.float32)
+    keep = (~hole).astype(np.float32)
+    out = a.copy()
+    todo = hole.copy()
+    for i, r in enumerate((4, 10, 24, 60, 140, 300)):
+        num = np.asarray(Image.fromarray(np.uint8(np.clip(a * keep[..., None], 0, 255))).filter(ImageFilter.BoxBlur(r)), dtype=np.float32)
+        den = np.asarray(Image.fromarray(np.uint8(keep * 255)).filter(ImageFilter.BoxBlur(r)), dtype=np.float32)[..., None] / 255
+        est = num / np.maximum(den, 1e-3)
+        ok = todo & (den[..., 0] > (0.3 if i < 5 else 0.001))
+        out[ok] = est[ok]
+        todo &= ~ok
+    rng = np.random.default_rng(1)
+    out[hole] += rng.normal(0, 4, (int(hole.sum()), 1))
+    return Image.fromarray(np.uint8(np.clip(out, 0, 255)))
+
+
+def paint_out_tower(im, size):
+    """The orthophoto shows the 146 m tower 'lying' west-east with its shadow (relief displacement): remove it."""
+    w = im.size[0]
+    yy, xx = np.mgrid[0:w, 0:w]
+    x = (xx - w / 2) * size / w + TOWER_GAME_X
+    z = (yy - w / 2) * size / w
+    hole = (x > -12) & (x < 155) & (z > -42) & (z < 26)
+    return fill(im, hole)
+
+
+GULF = np.array([38, 92, 104], dtype=np.float32)  # open-water colour offshore
+
+
+def mirror_fill(a, gap):
+    """Fills gap pixels by reflecting the imagery across the gap's edge (first down the columns, then along rows)."""
+    a, gap = a.copy(), gap.copy()
+    h, w = gap.shape
+    for axis in (0, 1):
+        A = a if axis == 0 else a.transpose(1, 0, 2)
+        G = gap if axis == 0 else gap.T
+        for i in range(G.shape[1]):
+            col = G[:, i]
+            if not col.any():
+                continue
+            idx = np.flatnonzero(col)
+            start = idx[0]
+            if start == 0:
+                continue
+            src = 2 * start - 1 - idx
+            ok = (src >= 0) & ~G[np.clip(src, 0, len(col) - 1), i]
+            A[idx[ok], i] = A[src[ok], i]
+            G[idx[ok], i] = False
+    return a, gap
+
+
+GULF = np.array([38, 92, 104], dtype=np.float32)  # open-water colour offshore
+
+
+def sea_fill(im, mpp, shore_x, feather_px=30):
+    """
+    No imagery well offshore or across the border: east of the shore, fill with open-water colour (feathered);
+    west of it, mirror the neighbouring land across the edge of the gap, which leaves no seam.
+    """
+    a = np.asarray(im, dtype=np.float32)
+    w = a.shape[0]
+    xs = (np.arange(w) - w / 2) * mpp + TOWER_GAME_X
+    dark = a.sum(axis=2) < 25
+    west = np.broadcast_to(xs[None, :] < shore_x - 200, dark.shape)
+    a, left = mirror_fill(a, dark & west)
+    sea_gap = dark & ~west | left
+    feather = np.asarray(Image.fromarray(np.uint8(sea_gap * 255)).filter(ImageFilter.MaxFilter(9)).filter(ImageFilter.GaussianBlur(feather_px)), dtype=np.float32)[..., None] / 255
+    return Image.fromarray(np.uint8(a * (1 - feather) + GULF * feather))
 
 
 def sea_mask(im):
-    """Open water: blue-green and fairly saturated (the Gulf), not the brown-green lagoon flats."""
-    m = Image.new("L", im.size)
-    px, mp = im.load(), m.load()
-    for y in range(im.size[1]):
-        for x in range(im.size[0]):
-            r, g, b = px[x, y]
-            mp[x, y] = 255 if (b > r + 18 and g > r + 10 and b > 70) else 0
-    return m.filter(ImageFilter.MedianFilter(7))
+    """Open water: bluer and greener than it is red (the Gulf), not the brown-green flats."""
+    a = np.asarray(im.resize((1024, 1024)), dtype=np.int32)
+    r, g, b = a[..., 0], a[..., 1], a[..., 2]
+    m = (b > r + 14) & (g > r + 8) & (b > 60)
+    return Image.fromarray(np.uint8(m * 255)).filter(ImageFilter.MedianFilter(7))
 
 
-def fill_gaps(im, mpp, shore_x):
-    """
-    USGS has no imagery far offshore or across the border. Fill those (black) pixels: open sea with the
-    mean colour of the imaged offshore water, land by tiling a patch of real land texture, then feather the seam.
-    """
-    w, h = im.size
-    px = im.load()
-    gap = Image.new("L", im.size)
-    gp = gap.load()
-    sea = [0, 0, 0, 0]
-    for y in range(h):
-        for x in range(w):
-            r, g, b = px[x, y]
-            if r + g + b < 20:
-                gp[x, y] = 255
-            elif (x - w / 2) * mpp + TOWER_GAME_X > shore_x + 2500:
-                sea[0] += r; sea[1] += g; sea[2] += b; sea[3] += 1
-    sea_c = tuple(int(c / max(1, sea[3])) for c in sea[:3])
-    patch = im.crop((80, 1200, 400, 1500))  # real coastal-plain land west of the lagoon
-    fill = Image.new("RGB", im.size, sea_c)
-    for y in range(0, h, patch.size[1]):
-        for x in range(0, w, patch.size[0]):
-            if (x + patch.size[0] - w / 2) * mpp + TOWER_GAME_X < shore_x:
-                fill.paste(patch, (x, y))
-    fill = fill.filter(ImageFilter.GaussianBlur(1))
-    feather = gap.filter(ImageFilter.MaxFilter(31)).filter(ImageFilter.GaussianBlur(48))
-    return Image.composite(fill, im, feather)
+def rough(mask):
+    """Roughness map for three.js (green channel): sea glossy, land matte."""
+    g = mask.point(lambda v: 255 - int(v * 0.62))  # sea roughness ~0.38: glints, but not a mirror
+    full = Image.new("L", mask.size, 255)
+    return Image.merge("RGB", [full, g, full])
 
 
-near, near_mpp = mosaic(16, 2048)
-far, far_mpp = mosaic(13, 2048)
-far = fill_gaps(far, far_mpp, 720)
+def match(src, region, ref):
+    """Colour-match src to ref, using the statistics of `region` (the part of src that ref also shows)."""
+    s, g, r = (np.asarray(i, dtype=np.float32) for i in (src, region, ref))
+    o = (s - g.mean((0, 1))) * (r.std((0, 1)) / np.maximum(g.std((0, 1)), 1)) + r.mean((0, 1))
+    return Image.fromarray(np.uint8(np.clip(o, 0, 255)))
 
 
-def stats(im):
-    from PIL import ImageStat
-    st = ImageStat.Stat(im)
-    return st.mean, st.stddev
+def blend_border(inner, outer_crop, px=120):
+    """Fades the border of an inner patch into the (upsampled) outer patch so there is no seam."""
+    m = Image.new("L", inner.size, 0)
+    from PIL import ImageDraw
+    ImageDraw.Draw(m).rectangle((px, px, inner.size[0] - px - 1, inner.size[1] - px - 1), fill=255)
+    return Image.composite(inner, outer_crop.resize(inner.size, Image.BICUBIC), m.filter(ImageFilter.GaussianBlur(px / 2.5)))
 
 
-# The wide image comes from a different survey: match its colours to the detailed one over the shared area,
-# then fade the detailed patch's border into the wide image so there is no seam.
-inner = near.size[0] * near_mpp / far_mpp
-c = far.size[0] / 2
-box = (int(c - inner / 2), int(c - inner / 2), int(c + inner / 2), int(c + inner / 2))
-(fm, fs), (nm, ns) = stats(far.crop(box)), stats(near.resize((int(inner), int(inner))))
-bands = [b.point(lambda v, i=i: max(0, min(255, int((v - fm[i]) * ns[i] / max(1, fs[i]) + nm[i])))) for i, b in enumerate(far.split())]
-far = Image.merge("RGB", bands)
-under = far.crop(box).resize(near.size, Image.BICUBIC)
-edge = Image.new("L", near.size, 0)
-from PIL import ImageDraw
-ImageDraw.Draw(edge).rectangle((160, 160, near.size[0] - 161, near.size[1] - 161), fill=255)
-near = Image.composite(near, under, edge.filter(ImageFilter.GaussianBlur(60)))
+def crop_centre(im, size, inner):
+    w = im.size[0] * inner / size
+    c = im.size[0] / 2
+    return im.crop((int(c - w / 2), int(c - w / 2), int(c + w / 2), int(c + w / 2)))
+
+
+# --- imagery
+pad = paint_out_tower(naip(PAD, 2048), PAD)
+mid = paint_out_tower(naip(MID, 2048), MID)
+near = naip(NEAR, 2048)
+near = paint_out_tower(near, NEAR)
+
+# shoreline from the lidar: per row, the first point east of the dunes that stays at sea level
+H = dem(MID, 513)
+n = H.shape[0]
+g = (np.arange(n) - n // 2) * MID / (n - 1)
+xs, zs = [], []
+for row in range(n):
+    if abs(g[row]) > 900:
+        continue
+    for col in range(n // 2, n - 8):
+        if (H[row, col:col + 8] < 0.25).all():
+            xs.append(g[col] + TOWER_GAME_X)
+            zs.append(g[row])
+            break
+slope, shore = np.polyfit(zs, xs, 1)
+print("shore", shore, slope, file=sys.stderr)
+
+
+def geo_sea(im, size):
+    """Sea mask from the fitted shoreline (the near-shore water is too pale to find by colour)."""
+    w = im.size[0]
+    yy, xx = np.mgrid[0:w, 0:w]
+    x = (xx - w / 2) * size / w + TOWER_GAME_X
+    z = (yy - w / 2) * size / w
+    return (x > shore + slope * z + 15) & (np.abs(z) < 2500)
+
+
+near = sea_fill(near, NEAR / near.size[0], shore)
+FAR_SIZE = 35000
+far = naip(FAR_SIZE, 2048)  # same survey as the near patches, so the colours agree everywhere
+far_mpp = FAR_SIZE / far.size[0]
+far = sea_fill(far, far_mpp, shore, feather_px=70)
+FAR = FAR_SIZE
+
+# seamless nesting: each patch fades into the one around it at its border
+near = blend_border(near, crop_centre(far, FAR, NEAR))
+mid = blend_border(match(mid, mid, crop_centre(near, NEAR, MID)), crop_centre(near, NEAR, MID))
+pad = blend_border(match(pad, pad, crop_centre(mid, MID, PAD)), crop_centre(mid, MID, PAD), px=160)
 
 os.makedirs(OUT, exist_ok=True)
-near.save(os.path.join(OUT, "terrain-near.jpg"), quality=78, optimize=True, progressive=True)
-far.save(os.path.join(OUT, "terrain-far.jpg"), quality=78, optimize=True, progressive=True)
+for name, im in (("pad", pad), ("mid", mid), ("near", near), ("far", far)):
+    im.save(os.path.join(OUT, f"terrain-{name}.jpg"), quality=80, optimize=True, progressive=True)
+for name, im, size in (("mid", mid, MID), ("near", near, NEAR), ("far", far, FAR)):
+    m = np.asarray(sea_mask(im)) > 0
+    geo = np.asarray(Image.fromarray(np.uint8(geo_sea(im, size) * 255)).resize(m.shape[::-1])) > 0
+    rough(Image.fromarray(np.uint8((m | geo) * 255)).filter(ImageFilter.GaussianBlur(2))).save(os.path.join(OUT, f"terrain-{name}-rough.png"), optimize=True)
 
-# roughness for the far texture (green channel): sea glossy, land matte
-mask = sea_mask(far.resize((1024, 1024)))
-rough = Image.merge("RGB", [Image.new("L", mask.size, 255), mask.point(lambda v: 255 - int(v * 0.82)), Image.new("L", mask.size, 255)])
-rough.save(os.path.join(OUT, "terrain-rough.png"), optimize=True)
-nmask = sea_mask(near.resize((1024, 1024)))
-nrough = Image.merge("RGB", [Image.new("L", nmask.size, 255), nmask.point(lambda v: 255 - int(v * 0.82)), Image.new("L", nmask.size, 255)])
-nrough.save(os.path.join(OUT, "terrain-near-rough.png"), optimize=True)
+# --- heights for the mid patch: dunes and ridges above the pad level, sea and flats at 0,
+# flattened around the pad, fading to 0 at the patch edge so it meets the flat patches around it
+N = 257
+h = dem(MID, N)
+c = N // 2
+pad_level = float(np.median(h[c - 8:c + 8, c - 8:c + 8]))
+h = np.clip(h - pad_level, 0, None)
+g = (np.arange(N) - c) * MID / (N - 1)
+X, Z = np.meshgrid(g + TOWER_GAME_X, g)
+d_pad = np.hypot(X - 14, Z)
+h *= np.clip((d_pad - 200) / 120, 0, 1)
+edge = np.minimum.reduce([np.abs(X - TOWER_GAME_X + MID / 2), np.abs(X - TOWER_GAME_X - MID / 2), np.abs(Z + MID / 2), np.abs(Z - MID / 2)])
+h *= np.clip(edge / 150, 0, 1)
+h[X > shore + slope * Z] = 0  # the sea stays flat
+SCALE = 0.05  # m per grey level
+Image.fromarray(np.uint8(np.clip(np.round(h / SCALE), 0, 255))).save(os.path.join(OUT, "terrain-height.png"), optimize=True)
 
-# shoreline: for rows of the near mask within ±2 km of the tower, the first sea pixel from the west
-xs, zs = [], []
-w = nmask.size[0]
-mpp = near_mpp * near.size[0] / w
-mp = nmask.load()
-for row in range(w):
-    zm = (row - w / 2) * mpp
-    if abs(zm) > 2000:
-        continue
-    for col in range(w // 2, w):
-        if all(mp[c, row] for c in range(col, min(w, col + 6))):
-            xs.append((col - w / 2) * mpp + TOWER_GAME_X)
-            zs.append(zm)
-            break
-n = len(xs)
-mz, mx = sum(zs) / n, sum(xs) / n
-slope = sum((z - mz) * (x - mx) for z, x in zip(zs, xs)) / sum((z - mz) ** 2 for z in zs)
-shore = mx - slope * mz
-
+fa = np.asarray(far, dtype=np.float32)
+fx = (np.arange(fa.shape[1]) - fa.shape[1] / 2) * far_mpp + TOWER_GAME_X
+land_c = fa[:, fx < shore - 3000].reshape(-1, 3).mean(axis=0)
 meta = {
-    "source": "USGS National Map, USGSImageryOnly (public domain)",
-    "near": {"size": near.size[0] * near_mpp, "centre": [TOWER_GAME_X, 0]},
-    "far": {"size": far.size[0] * far_mpp, "centre": [TOWER_GAME_X, 0]},
-    "shore": {"x": round(shore, 1), "slope": round(slope, 4)},
+    "apron": {"land": [int(v) for v in land_c], "sea": [int(v) for v in GULF]},
+    "source": "USGS The National Map: NAIP Plus orthoimagery, USGSImageryOnly, 3DEP elevation (public domain)",
+    "centre": [TOWER_GAME_X, 0],
+    "pad": PAD, "mid": MID, "near": NEAR, "far": FAR,
+    "height": {"size": N, "scale": SCALE, "max": float(h.max())},
+    "shore": {"x": round(float(shore), 1), "slope": round(float(slope), 4)},
 }
 json.dump(meta, open(os.path.join(OUT, "terrain.json"), "w"), indent=2)
 print(json.dumps(meta, indent=2))

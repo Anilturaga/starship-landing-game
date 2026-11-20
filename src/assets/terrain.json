@@ -1,21 +1,32 @@
 {
-  "source": "USGS National Map, USGSImageryOnly (public domain)",
-  "near": {
-    "size": 4396.989736241846,
-    "centre": [
-      -7,
-      0
+  "apron": {
+    "land": [
+      138,
+      140,
+      127
+    ],
+    "sea": [
+      38,
+      92,
+      104
     ]
   },
-  "far": {
-    "size": 35175.91788993477,
-    "centre": [
-      -7,
-      0
-    ]
+  "source": "USGS The National Map: NAIP Plus orthoimagery, USGSImageryOnly, 3DEP elevation (public domain)",
+  "centre": [
+    -7,
+    0
+  ],
+  "pad": 600,
+  "mid": 2000,
+  "near": 6000,
+  "far": 35000,
+  "height": {
+    "size": 257,
+    "scale": 0.05,
+    "max": 6.605567932128906
   },
   "shore": {
-    "x": 740.6,
-    "slope": 0.0774
+    "x": 394.3,
+    "slope": 0.2338
   }
 }

@@ -20,7 +20,7 @@ This document records what was decided and why. The `prototype/` HTML file that 
 - **Zustand** for game state: screen, mode, camera and outcome. Per-frame data (telemetry, cues) is read straight from the simulation object, never pushed through React state at frame rate.
 - **Rapier** (`@dimforge/rapier3d-compat`) integrates the Ship as a rigid body and detects contacts.
 - **Own force model** in `src/sim/` (plain TypeScript): aerodynamics, Raptors, gimbal, flaps and RCS. Nothing off the shelf models a belly-flopping rocket, so this part is bespoke. It runs headless, so whole flights are tested in Node.
-- **drei** `<Sky>` (physically based Preetham sky), also baked into reflections with `<Environment>`.
+- **drei** `<Environment>` bakes the sky into reflections. drei's stock `<Sky>` was tried and dropped, because it couldn't produce the deep blue of the reference photos.
 - **@use-gesture** for camera drag, pinch and wheel; **Phosphor** for icons.
 - **vite-plugin-singlefile**: `npm run build:html` writes one self-contained `dist-html/index.html` (JS, CSS and Rapier's WebAssembly inlined). That file is what gets published for testing.
 - **Vitest** for the flight tests.
@@ -167,12 +167,26 @@ Losses report whether the site is safe (more than 150 m from the tower).
   - a brushed steel side and a hex-tile belly;
   - four hinged flaps, three sea-level and three vacuum Raptors, and catch pins.
   - Engine-bay parts sit 0.5 m inside the skin. Parts closer than that, seen edge-on, poked through as flickering dots.
-- **Ground:** real USGS aerial imagery of Boca Chica, which is public domain (`scripts/terrain.py`):
-  - **Patches:** a 4.4 km detailed patch (about 2 m per pixel) inside a 35 km patch, inside a hazy apron. They are rings around each other, so nothing overlaps or z-fights.
-  - **Water:** a sea mask from the imagery makes the Gulf glossy and rippling.
-  - **Shoreline:** fitted from the same mask and used by the physics, about 720 m east of the tower.
-  - **Gaps:** where USGS has no coverage (far offshore, across the border), the script fills with sea colour or tiled real land.
-  - **Shadows:** the terrain receives no shadows. With a 17° sun, the shadow volume's footprint showed as a striped band across it.
+- **Ground:** real USGS data of Boca Chica, all public domain (`scripts/terrain.py`):
+  - **NAIP orthoimagery (2024–25), in nested patches:**
+    - 0.3 m per pixel over the pad (600 m);
+    - 1 m over the centre 2 km;
+    - 3 m out to 6 km;
+    - 17 m out to 35 km;
+    - then plain land/sea colours to the horizon.
+  - **Seams:** each patch fades into the one around it, and the patches never overlap.
+  - **Pad location:** the tower base is placed from the imagery itself. In the orthophoto the 146 m tower appears to lie flat, with its shadow, because of relief displacement. That flattened image is painted out, since the 3D tower stands there.
+  - **Height:** lidar elevation (3DEP) raises the dunes and ridges in the centre 2 km. Heights are relative to the pad, flattened around it, held at zero at sea, and faded out at the patch edge.
+  - **Close range:** a fine detail texture fades in within a few hundred metres, so the ground still reads as ground from a few metres up.
+  - **Water:** the Gulf is glossy and rippling.
+  - **Shoreline:** fitted from the lidar, where the colour of the near-shore water is unreliable. It is about 394 m east of the tower and runs slightly east going south. The physics uses it.
+  - **Gaps:** where NAIP has no coverage (offshore, and south of the Rio Grande), the script fills with open-water colour, or mirrors the neighbouring land across the gap's edge, which leaves no seam.
+- **Sky:** a small gradient shader tuned to the reference photos:
+  - deep blue overhead, paler toward the horizon;
+  - a bright sun 38° up;
+  - cirrus streaks projected onto a high layer.
+  - The same sky without clouds is baked into reflections.
+  - Hull and ground take only a little of that blue: steel at metalness 0.6, and the ground slightly warmed, so neither reads blue or lilac.
 - **Tower:** Starbase Pad A, modelled from Wikimedia Commons photos:
   - a 146 m galvanised lattice in about 9 m modules, with corner columns, X-bracing, mid columns and a stair core;
   - a concrete base, and a top platform with a lightning mast;
@@ -180,9 +194,8 @@ Losses report whether the site is safe (more than 150 m from the tower).
   - Everything is instanced beams.
 - **Plumes:** a custom shader with shock diamonds, which lengthens as the air thins.
 - **Lighting:**
-  - a physical sky, also baked into reflections;
-  - a low sun whose shadow box follows the Ship in whole texels, so edges don't shimmer;
-  - haze.
+  - the sun's shadow box follows the Ship in whole texels, so edges don't shimmer;
+  - light haze, with fog matched to the sky's horizon colour.
 
 ## Roadmap
 
