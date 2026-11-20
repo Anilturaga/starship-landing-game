@@ -61,7 +61,15 @@ Attitude control blends three effectors, sharing out the requested torque among 
 
 **Engines.** Throttle 0 means off, and anything above zero lights the engines. The flight computer picks how many engines (1–3) are needed for the thrust asked for. This mirrors the real vehicle shutting engines down late in the burn, because three Raptors at minimum throttle cannot hover.
 
-**Fly-by-wire.** With fly-by-wire, the stick commands a turn rate (up to 20°/s) and the computer holds attitude. Without it, the stick commands torque directly. All modes currently use fly-by-wire.
+**Fly-by-wire laws** (`src/sim/control.ts`):
+
+- **Attitude** (Cadet, Pilot): the stick position *is* the attitude you want, and letting go holds it. It flies against a latched reference:
+  - **Belly:** pitch stick sets the nose angle, ±25° from level. Lateral stick turns the heading.
+  - **Flip:** latched once the engines are lit and the nose is coming up. Pull back to keep rotating; let go to hold.
+  - **Upright:** below 20° of tilt. The stick sets the lean, up to 20°, toward the belly (forward) or the sides.
+- **Rate** (Expert): the stick sets a turn rate, up to 20°/s, and the computer holds whatever attitude you stop at.
+
+The first build used rate command everywhere. Playtesting showed it can't be followed reliably. The cue depended on the current attitude, so a player reacting about half a second late chased it and overshot. The cue also saturated in the stick's corners, outside its round travel.
 
 ## Controls
 
@@ -75,27 +83,37 @@ Keyboard: WASD stick, Shift/X throttle, Space engines off/on, C or 1–5 cameras
 
 ## Flight computer (`src/sim/guidance.ts`)
 
-The flight computer runs five times a second. It suggests a stick position and a throttle setting; it never moves your controls, except for the throttle in Cadet.
+The flight computer runs ten times a second. It suggests a stick position and a throttle in the terms of the attitude law, so a cue is a place to put your thumb, not a correction to chase. It never moves your controls, except the throttle in Cadet.
+
+**Built for human reaction time.**
+- **Lead:** cues are computed for where the Ship will be 0.4 s from now. Velocity is led from the current thrust, not from measured acceleration, which would feed the throttle back into itself.
+- **Reach:** cues stay inside 85% of the stick's round travel.
+- **Gains:** they are low enough that a ~0.7 s total delay (reaction plus thumb) stays stable.
 
 | Phase | Goal | Cue |
 | --- | --- | --- |
-| Glide | Arrive above 1.2 km about 120 m short of the tower | Steer the nose at the target; pitch down to glide, up to brake |
+| Glide | Point the nose at the catch, and arrive at flip altitude about 260 m out | Lateral stick to turn, pitch stick to glide or brake |
 | Light | Start the engines | Throttle about 15% |
-| Flip | Stand the Ship up without being thrown forward | Rotate toward vertical, leaning back against sideways drift; more throttle only if needed to stop in time |
-| Descend | Follow a descent-rate profile (√(4h), at least 1 m/s) and close the gap | Tilt toward the catch axis (up to ~20°); throttle for the descent profile |
+| Flip | Stand the Ship up | Hold the stick back; minimum thrust until the nose is past 45°, so the burn doesn't throw the Ship forward |
+| Descend | Close the gap and follow a descent profile | Lean toward the target; descent rate √(4h), easing to ~1 m/s; within 60 m of the arms, creep until lined up |
+
+The approach distance matters. The flip carries the Ship forward and braking takes room, so the glide stops well short: if it doesn't, the Ship overshoots into the tower.
 
 **Abort.** If a catch becomes impossible, the computer latches an abort:
-- It aborts when there isn't enough Δv to stop, the tower is out of glide range, or the Ship is too far from the tower too low.
-- It diverts to the Gulf if the water is within reach, otherwise to open ground at least 320 m from the tower.
-- An ocean divert slows the descent to buy time.
+- **When:** there isn't enough Δv to stop; the tower is out of reach of the glide plus what the upright descent can still cover; or it's out of reach of the remaining descent once upright.
+- **Where:** the Gulf if the water is within reach, otherwise open ground at least 320 m from the tower.
+- **Ocean divert:** slows the descent to buy time.
 
-**Presentation.** Text callouts were tried and dropped; players follow the shapes:
-- A blue ring on the stick, mirrored in a small scope above it so the thumb never hides it.
-- A blue mark on the throttle, with ▲ / ▼ / ● arrows above it.
-- Cues are smoothed so they glide rather than jump.
-- During an abort, a short red tag explains why and the cues turn red.
+**Presentation.**
+- **Stick:** a blue ring on the stick, mirrored in a scope above it so the thumb never hides it.
+- **Throttle:** a blue mark, with up and down arrows above it.
+- **Abort:** a short red tag, and the cues turn red.
 
-**Test.** `tests/flight.test.ts` flies a whole descent by doing exactly what the cues say. It must catch the Ship in Cadet and Pilot, and the two abort scenarios must end in the ocean and on open ground respectively.
+**Tests** (`tests/flight.test.ts`, `tests/pilot.ts`). A simulated player flies whole descents. It sees each cue 0.45 s late, moves its thumb with a 0.25 s lag, and has hand tremor.
+- **Catches:** it must catch the Ship in every one of 10 seeded runs in both Cadet and Pilot. A perfect follower must also catch.
+- **Cues:** every cue must stay inside the stick's travel.
+- **Aborts:** the two abort scenarios must end in the ocean and on open ground.
+- **Slower player:** tuning used a slower, shakier player too (0.7 s, double tremor), which still catches about two times in three.
 
 ## Modes
 
@@ -145,15 +163,31 @@ Losses report whether the site is safe (more than 150 m from the tower).
 
 ## Visuals
 
-- **Ship:** built procedurally to match the V3 reference render, with a brushed steel side, a hex-tile belly, four hinged flaps, three sea-level and three vacuum Raptors, and catch pins.
+- **Ship:** built procedurally to match the V3 reference render:
+  - a brushed steel side and a hex-tile belly;
+  - four hinged flaps, three sea-level and three vacuum Raptors, and catch pins.
+  - Engine-bay parts sit 0.5 m inside the skin. Parts closer than that, seen edge-on, poked through as flickering dots.
+- **Ground:** real USGS aerial imagery of Boca Chica, which is public domain (`scripts/terrain.py`):
+  - **Patches:** a 4.4 km detailed patch (about 2 m per pixel) inside a 35 km patch, inside a hazy apron. They are rings around each other, so nothing overlaps or z-fights.
+  - **Water:** a sea mask from the imagery makes the Gulf glossy and rippling.
+  - **Shoreline:** fitted from the same mask and used by the physics, about 720 m east of the tower.
+  - **Gaps:** where USGS has no coverage (far offshore, across the border), the script fills with sea colour or tiled real land.
+  - **Shadows:** the terrain receives no shadows. With a 17° sun, the shadow volume's footprint showed as a striped band across it.
+- **Tower:** Starbase Pad A, modelled from Wikimedia Commons photos:
+  - a 146 m galvanised lattice in about 9 m modules, with corner columns, X-bracing, mid columns and a stair core;
+  - a concrete base, and a top platform with a lightning mast;
+  - black truss chopsticks on a carriage, and the Ship quick-disconnect arm swung back.
+  - Everything is instanced beams.
 - **Plumes:** a custom shader with shock diamonds, which lengthens as the air thins.
-- **Lighting:** a low sun with shadows that follow the Ship, a sky dome baked into reflections, and fog for haze.
-- **Site:** a lattice tower with chopsticks, the launch mount, a tank farm, buildings, a second tower, a sand strip and an animated Gulf.
+- **Lighting:**
+  - a physical sky, also baked into reflections;
+  - a low sun whose shadow box follows the Ship in whole texels, so edges don't shimmer;
+  - haze.
 
 ## Roadmap
 
 1. **Start higher.** Start at 10–15 km, with time compression in the quiet part of the fall.
-2. **Realism pass on assets.** Real sky photos (HDRI) and terrain textures from CC0 libraries (Poly Haven, ambientCG), a better tower model, and RCS puffs.
+2. **Realism pass, continued.** Current-day imagery of the pad itself (the USGS photos predate the finished site), site buildings from OpenStreetMap, and RCS puffs.
 3. **Sound.** Wind roar that scales with dynamic pressure, Raptor ignition and rumble, and arm contact.
 4. **Solid catch contacts.** Rapier is in; make the pin and arm colliders solid so the Ship slides on the rails and can tip.
 5. **Replays and ghost runs.** Deterministic stepping is already in place; this needs input recording.

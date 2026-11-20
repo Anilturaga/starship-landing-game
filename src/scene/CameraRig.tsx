@@ -17,7 +17,7 @@ function onboard(pos: [number, number, number], look: [number, number, number], 
 }
 const c60 = Math.cos(Math.PI / 3), s60 = Math.sin(Math.PI / 3);
 const AFT_FLAP = onboard([4.95, -5, -2.3], [6.6, -24, -1.2], [0, 0, -1], 70);
-const ENGINE_BAY = onboard([c60 * 4.15, -21.6, s60 * 4.15], [-1.2, -34, -2], [c60, 0, s60], 105);
+const ENGINE_BAY = onboard([c60 * 3.7, -21.6, s60 * 3.7], [-1.2, -34, -2], [c60, 0, s60], 105);
 const TRACKING_POS = new Vector3(1650, 9, 1250);
 const TOWER_POS = new Vector3(25, ARM_Y + 2, -9);
 

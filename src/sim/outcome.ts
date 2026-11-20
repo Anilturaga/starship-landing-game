@@ -1,5 +1,5 @@
 import { Vector3 } from 'three';
-import { CATCH, HALF, PIN_OFFSET, SHORE_X } from './constants';
+import { CATCH, HALF, PIN_OFFSET, shoreX } from './constants';
 import type { CatchLimits } from './modes';
 import { bodyAxes, type ShipState } from './physics';
 import type { Hit } from './world';
@@ -63,7 +63,7 @@ export function judge(s: ShipState, hits: ReadonlySet<Hit>, limits: CatchLimits)
   if (hits.has('mount')) return end('crash', 'The Ship hit the launch mount.');
 
   const speed = s.vel.length();
-  if (s.pos.x > SHORE_X) {
+  if (s.pos.x > shoreX(s.pos.z)) {
     return end('ocean', descent < 6
       ? 'Soft splashdown in the Gulf. The Ship is lost, but the tower and pad are safe.'
       : `The Ship hit the water at ${speed.toFixed(0)} m/s. It is lost, but the tower and pad are safe.`);

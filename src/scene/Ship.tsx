@@ -1,7 +1,7 @@
 import { useFrame } from '@react-three/fiber';
 import { useMemo } from 'react';
 import {
-  AdditiveBlending, BackSide, BoxGeometry, CircleGeometry, CylinderGeometry, DoubleSide, ExtrudeGeometry, Group,
+  AdditiveBlending, BackSide, BoxGeometry, CircleGeometry, CylinderGeometry, DoubleSide, ExtrudeGeometry, Group, RingGeometry,
   LatheGeometry, Mesh, MeshStandardMaterial, PointLight, ShaderMaterial, Shape, Sprite, SpriteMaterial, Vector2,
   type BufferGeometry, type Material,
 } from 'three';
@@ -90,13 +90,20 @@ function buildShip(): ShipParts {
     n.position.y = 13;
     root.add(n);
   }
-  const liner = mesh(new CylinderGeometry(R - 0.04, R - 0.04, 6, 48, 1, true), new MeshStandardMaterial({ color: 0x2a2b2e, metalness: 0.6, roughness: 0.6, side: BackSide }), false);
-  liner.position.y = -HALF + 3;
-  root.add(liner);
-  const dome = mesh(new CircleGeometry(R - 0.05, 48), dark);
+  // Engine bay, kept well inside the skin: parts within a few cm of the hull, seen edge-on,
+  // poke through it as flickering dark dots (depth interpolation error on grazing triangles).
+  const BAY = R - 0.5;
+  const bayMat = new MeshStandardMaterial({ color: 0x2a2b2e, metalness: 0.6, roughness: 0.6, side: BackSide });
+  const liner = mesh(new CylinderGeometry(BAY, BAY, 5.2, 48, 1, true), bayMat, false);
+  liner.position.y = -HALF + 2.6;
+  const facing = new MeshStandardMaterial({ color: 0x1b1c1f, metalness: 0.15, roughness: 0.8 });
+  const dome = mesh(new CircleGeometry(BAY, 48), facing, false); // faces down, into the bay
   dome.rotation.x = Math.PI / 2;
-  dome.position.y = -20.8;
-  root.add(dome);
+  dome.position.y = -HALF + 5.2;
+  const rim = mesh(new RingGeometry(BAY, R, 64), facing, false); // closes the skirt between skin and bay
+  rim.rotation.x = Math.PI / 2;
+  rim.position.y = -HALF;
+  root.add(liner, dome, rim);
   for (const s of [-1, 1]) {
     const p = mesh(new BoxGeometry(1.4, 0.9, 1.3), pinMat);
     p.position.set(s * (R + 0.4), PIN_OFFSET, 0);

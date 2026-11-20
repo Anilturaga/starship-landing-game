@@ -58,22 +58,6 @@ export const steelRoughness = () =>
     x.fillRect(0, 3, w, 2);
   }, { repeat: [6, 22] });
 
-/** Coastal scrub and sand. */
-export const groundTexture = () =>
-  canvasTexture(256, 256, (x, w, h) => {
-    x.fillStyle = '#6a6446';
-    x.fillRect(0, 0, w, h);
-    for (let i = 0; i < 2600; i++) {
-      const r = 1 + Math.random() * 5;
-      x.fillStyle = Math.random() < 0.55
-        ? `rgba(66,76,46,${0.25 + Math.random() * 0.35})`
-        : `rgba(158,146,110,${0.2 + Math.random() * 0.3})`;
-      x.beginPath();
-      x.arc(Math.random() * w, Math.random() * h, r, 0, TAU);
-      x.fill();
-    }
-  }, { repeat: [260, 260], srgb: true });
-
 /** Tileable wave normal map. */
 export const waterNormals = () =>
   canvasTexture(256, 256, (x, w, h) => {

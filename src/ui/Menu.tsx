@@ -25,9 +25,10 @@ export function Menu() {
       <details className="how">
         <summary>How to fly</summary>
         <ul>
-          <li><b>Glide:</b> tilt the nose down to glide toward the tower, and up to slow down.</li>
-          <li><b>Flip:</b> at about 1.2 km, light the Raptors with a little throttle and pull back to stand the Ship up.</li>
-          <li><b>Settle:</b> throttle against the fall and nudge the stick to drift over the arms.</li>
+          <li><b>The stick sets the attitude.</b> Where your thumb is, is how the Ship leans. Let go and it holds steady. (Expert: the stick sets a turn rate instead.)</li>
+          <li><b>Glide:</b> push forward to tilt the nose down and glide toward the tower, pull back to slow down, and push sideways to turn.</li>
+          <li><b>Flip:</b> at about 1.2 km the Raptors light. Pull back and hold to swing the Ship upright; let go to stop the rotation.</li>
+          <li><b>Settle:</b> lean toward the tower with small stick movements, and throttle against the fall. Near the arms, creep down slowly until lined up.</li>
           <li><b>Cues:</b> line up the white dot inside the blue ring in the scope above the stick. Above the throttle, an up caret means push up, a down caret pull down, a dot hold.</li>
           <li><b>Camera:</b> drag the screen to look around, pinch or scroll to zoom, double-tap to reset.</li>
         </ul>
@@ -36,6 +37,7 @@ export function Menu() {
           <kbd>C</kbd> camera · <kbd>T</kbd> slow motion · <kbd>R</kbd> restart · <kbd>Esc</kbd> menu
         </div>
       </details>
+      <p className="credit">Ground imagery: USGS National Map (public domain).</p>
     </div>
   );
 }

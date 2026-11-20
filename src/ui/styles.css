@@ -117,6 +117,7 @@ button:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
 .mode span { font-size: 13px; color: var(--dim); line-height: 1.4; }
 .mode:hover, .mode[aria-pressed='true'] { border-color: var(--fg); background: rgba(255, 255, 255, 0.08); }
 details.how summary { cursor: pointer; font-size: 13px; color: var(--dim); }
+.credit { font-size: 11px; color: var(--dim); margin: 10px 0 0; }
 .keys { font-size: 12px; color: var(--dim); margin-top: 8px; line-height: 1.8; }
 kbd { font-family: var(--f); font-size: 11px; border: 1px solid var(--line); border-radius: 3px; padding: 0 5px; color: var(--fg); }
 .stats { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 16px; }

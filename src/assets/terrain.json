@@ -1,0 +1,21 @@
+{
+  "source": "USGS National Map, USGSImageryOnly (public domain)",
+  "near": {
+    "size": 4396.989736241846,
+    "centre": [
+      -7,
+      0
+    ]
+  },
+  "far": {
+    "size": 35175.91788993477,
+    "centre": [
+      -7,
+      0
+    ]
+  },
+  "shore": {
+    "x": 740.6,
+    "slope": 0.0774
+  }
+}

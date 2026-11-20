@@ -1,3 +1,5 @@
+import type { Law } from './control';
+
 export type ModeId = 'cadet' | 'pilot' | 'expert';
 
 export interface CatchLimits {
@@ -11,8 +13,8 @@ export interface Mode {
   id: ModeId;
   name: string;
   desc: string;
-  /** Stick commands a turn rate and the computer holds attitude. */
-  fbw: boolean;
+  /** Fly-by-wire law: the stick sets an attitude, or a turn rate. See control.ts. */
+  law: Law;
   /** Show the flight computer's stick/throttle cues. */
   guides: boolean;
   /** Flight computer drives the throttle. */
@@ -33,21 +35,21 @@ export const MODES: Record<ModeId, Mode> = {
     id: 'cadet',
     name: 'Cadet',
     desc: 'You steer. The flight computer runs the throttle, and blue cues show where to put the stick.',
-    fbw: true, guides: true, autoThrottle: true, autoSlowMo: true,
+    law: 'attitude', guides: true, autoThrottle: true, autoSlowMo: true,
     wind: [0, 0, 0], propellant: 45_000, limits: RELAXED,
   },
   pilot: {
     id: 'pilot',
     name: 'Pilot',
     desc: 'You steer and run the throttle, with the same blue cues for both.',
-    fbw: true, guides: true, autoThrottle: false, autoSlowMo: true,
+    law: 'attitude', guides: true, autoThrottle: false, autoSlowMo: true,
     wind: [4, 2, 1.3], propellant: 34_000, limits: STANDARD,
   },
   expert: {
     id: 'expert',
     name: 'Expert',
     desc: 'No cues and no slow motion, with gusty wind. Just you and the telemetry.',
-    fbw: true, guides: false, autoThrottle: false, autoSlowMo: false,
+    law: 'rate', guides: false, autoThrottle: false, autoSlowMo: false,
     wind: [8, 4, 3], propellant: 34_000, limits: STANDARD,
   },
 };

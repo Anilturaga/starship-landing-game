@@ -27,7 +27,8 @@ export const THROTTLE_OFF = 0.03;
 // Attitude control
 export const RCS_TORQUE = 8e5; // N·m, small constant authority
 export const FLAP_GAIN = 4500; // m³, flap torque per pascal of dynamic pressure (tuned)
-export const MAX_RATE = 0.35; // rad/s commanded by full stick with fly-by-wire
+export const MAX_RATE = 0.35; // rad/s, fastest turn the fly-by-wire will command
+export const MAX_TILT = (20 * Math.PI) / 180; // full stick when upright (attitude law)
 export const FLAP_RATE = 1.2; // rad/s actuator slew limit
 
 // Atmosphere
@@ -37,10 +38,13 @@ export const SCALE_HEIGHT = 8500;
 // Site layout (tower at the origin, Gulf to +x)
 export const ARM_Y = 72; // top surface of the chopsticks
 export const CATCH = { x: 14, z: 0 }; // catch axis between the arms
-export const TOWER = { x: -5.5, width: 9, height: 146 };
+export const TOWER = { x: -7, width: 12, height: 146 };
 export const ARM_REACH = { x0: -1, x1: 25, halfGap: 5.9 };
 export const MOUNT = { radius: 11, top: 27 };
-export const SHORE_X = 1300;
+/** The real Boca Chica shoreline (from the USGS imagery, see scripts/terrain.py): x = SHORE_X + SHORE_SLOPE · z. */
+export const SHORE_X = 720;
+export const SHORE_SLOPE = 0.0776;
+export const shoreX = (z: number) => SHORE_X + SHORE_SLOPE * z;
 
 // Simulation
 export const STEP = 1 / 120;

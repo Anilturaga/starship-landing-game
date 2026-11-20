@@ -1,11 +1,30 @@
 import { Vector3 } from 'three';
 import {
-  ARM_Y, CATCH, DRY_MASS, FLIP_ALT, G0, MAX_RATE, PIN_OFFSET, HALF, RAPTOR_THRUST, SHORE_X, SL_ENGINES, THROTTLE_OFF,
+  ARM_Y, CATCH, DRY_MASS, FLIP_ALT, G0, HALF, MAX_TILT, PIN_OFFSET, RAPTOR_THRUST, shoreX, SL_ENGINES, THROTTLE_OFF,
 } from './constants';
+import { BELLY_PITCH, inGate } from './control';
 import { bodyAxes, deltaVLeft, type ShipState } from './physics';
 
-const clamp = (v: number, a: number, b: number) => Math.min(b, Math.max(a, v));
+/**
+ * The flight computer. It suggests a stick position and a throttle in the terms of the `attitude`
+ * fly-by-wire law (control.ts), so a cue is a place to put your thumb, not a correction to chase.
+ *
+ * Cues are computed for where the Ship will be LEAD seconds from now, which covers a player's
+ * reaction time, and stay inside GATE of the stick's round travel so they are always reachable.
+ * tests/flight.test.ts flies whole descents with a simulated human (delay, lag, tremor) to keep it honest.
+ */
+export const LEAD = 0.4; // s
+const GATE = 0.85;
+/**
+ * The glide points the nose at the catch and arrives at flip altitude this far out: the flip carries the
+ * Ship forward and the braking takes room, and both should happen short of the tower.
+ */
+const ENTRY = 260;
+/** Sideways distance the upright descent can cover from the flip down (see the upright rule in assess). */
+const UPRIGHT_REACH = 7 * (Math.sqrt(FLIP_ALT - ARM_Y) + 15);
 const MAX_THRUST = SL_ENGINES * RAPTOR_THRUST;
+const clamp = (v: number, a: number, b: number) => Math.min(b, Math.max(a, v));
+const deg = (r: number) => (r * 180) / Math.PI;
 
 export type GuidePhase = 'glide' | 'light' | 'flip' | 'descend';
 export interface Abort {
@@ -20,128 +39,136 @@ export interface Guide {
   stick: { x: number; y: number } | null;
   throttle: number | null;
   abort: Abort | null;
-  /** Latched once the flip is complete, released if the Ship tips past 40°. */
-  upright: boolean;
 }
 
-export const createGuide = (): Guide => ({ phase: 'glide', stick: null, throttle: null, abort: null, upright: false });
+export const createGuide = (): Guide => ({ phase: 'glide', stick: null, throttle: null, abort: null });
+
+/** What the computer looks at, predicted LEAD seconds ahead. */
+interface View {
+  A: Vector3; BX: Vector3; BZ: Vector3;
+  pin: Vector3; base: Vector3; vel: Vector3; vh: Vector3;
+  vs: number; tilt: number; alt: number; hArm: number; mass: number; lit: boolean;
+}
 
 const ax = { x: new Vector3(), y: new Vector3(), z: new Vector3() };
-const v = () => new Vector3();
 
-/**
- * Updates `g` with the next suggested inputs. Called a few times a second.
- * The stick cue is a turn-rate command (it assumes fly-by-wire); `fbw=false` converts it to a torque cue.
- */
-export function updateGuide(s: ShipState, g: Guide, fbw: boolean) {
+function look(s: ShipState): View {
   const { x: BX, y: A, z: BZ } = bodyAxes(s.q, ax);
-  const pin = v().copy(s.pos).addScaledVector(A, PIN_OFFSET);
-  const base = v().copy(s.pos).addScaledVector(A, -HALF);
-  const tilt = (Math.acos(clamp(A.y, -1, 1)) * 180) / Math.PI;
-  const alt = base.y;
-  const vh = v().set(s.vel.x, 0, s.vel.z);
-  const vs = -s.vel.y;
-  const lit = s.thr > THROTTLE_OFF;
-  const m = DRY_MASS + s.prop;
+  // Lead by LEAD seconds: positions from velocity, velocity from the current thrust and gravity
+  // (not from measured acceleration, which would feed the throttle back into itself).
+  const mass = DRY_MASS + s.prop;
+  const pos = s.pos.clone().addScaledVector(s.vel, LEAD);
+  const pin = pos.clone().addScaledVector(A, PIN_OFFSET);
+  const base = pos.clone().addScaledVector(A, -HALF);
+  const vel = s.vel.clone().addScaledVector(A, (s.thrust / mass) * LEAD);
+  vel.y -= G0 * LEAD;
+  const vh = new Vector3(vel.x, 0, vel.z);
+  return {
+    A, BX, BZ, pin, base, vel, vh,
+    vs: -vel.y,
+    tilt: deg(Math.acos(clamp(A.y, -1, 1))),
+    alt: base.y,
+    hArm: pin.y - ARM_Y,
+    mass,
+    lit: s.thr > THROTTLE_OFF,
+  };
+}
 
-  if (g.upright && tilt > 40) g.upright = false;
-  const belly = !g.upright && tilt > 45 && !lit;
-  const dTower = Math.hypot(CATCH.x - pin.x, CATCH.z - pin.z);
-  const hArm = pin.y - ARM_Y;
+/** Latches an abort when a catch is no longer possible: the Gulf if in reach, otherwise open ground. */
+function assess(s: ShipState, v: View, g: Guide, belly: boolean) {
+  if (g.abort) return;
+  const dTower = Math.hypot(CATCH.x - v.pin.x, CATCH.z - v.pin.z);
+  const dvNeed = v.vel.length() + 9.81 * clamp(v.hArm / 15, 6, 40) * 0.8 + dTower * 0.04;
+  const glide = (Math.max(0, v.alt - FLIP_ALT) / Math.max(v.vs, 1)) * 30 + 120;
+  let why: string | null = null;
+  if (deltaVLeft(s.prop) < dvNeed) why = 'Not enough propellant left to stop at the tower.';
+  // the glide, plus what the upright descent can still cover after the flip
+  else if (belly && v.alt < FLIP_ALT + 900 && dTower > glide + UPRIGHT_REACH) why = 'The tower is out of glide range.';
+  // upright: time left on the descent profile (dh/dt = 2√h gives √h seconds) plus the creep near the arms,
+  // flown at the 7 m/s approach speed
+  else if (s.ref === 'upright' && dTower > 20 + 7 * (Math.sqrt(Math.max(0, v.hArm)) + 15)) why = 'Too far from the tower to reach it this low.';
+  if (!why) return;
+  const dOcean = Math.max(0, shoreX(v.pin.z) + 150 - v.pin.x);
+  let reach: number;
+  if (belly) reach = glide + 250;
+  else { const t = Math.max(3, v.base.y / Math.max(v.vs, 4)); reach = Math.max(0, v.vel.x * t) + 0.5 * 2.5 * t * t; }
+  g.abort = { why, mode: dOcean < reach ? 'ocean' : 'clear' };
+}
 
-  // Is a catch still possible? If not, latch an abort: the Gulf if it is in reach, otherwise open ground.
-  if (!g.abort) {
-    const dvNeed = s.vel.length() + 9.81 * clamp(hArm / 15, 6, 40) * 0.8 + dTower * 0.04;
-    const glide = (Math.max(0, alt - FLIP_ALT) / Math.max(vs, 1)) * 30 + 120;
-    let why: string | null = null;
-    if (deltaVLeft(s.prop) < dvNeed) why = 'Not enough propellant left to stop at the tower.';
-    else if (belly && alt < FLIP_ALT + 900 && dTower > glide) why = 'The tower is out of glide range.';
-    else if (g.upright && hArm < 350 && dTower > 160) why = 'Too far from the tower to reach it this low.';
-    if (why) {
-      const dOcean = Math.max(0, SHORE_X + 150 - pin.x);
-      let reach: number;
-      if (belly) reach = glide + 250;
-      else { const t = Math.max(3, base.y / Math.max(vs, 4)); reach = Math.max(0, s.vel.x * t) + 0.5 * 2.5 * t * t; }
-      g.abort = { why, mode: dOcean < reach ? 'ocean' : 'clear' };
-    }
-  }
-
+/** Where to go: the catch axis, or an abort site. */
+function targetOf(v: View, g: Guide) {
   const ab = g.abort;
-  let target = new Vector3(CATCH.x, 0, CATCH.z);
-  if (ab?.mode === 'ocean') target = new Vector3(Math.max(SHORE_X + 450, pin.x + 60), 0, pin.z);
+  const t = new Vector3(CATCH.x, 0, CATCH.z);
+  if (ab?.mode === 'ocean') t.set(Math.max(shoreX(v.pin.z) + 450, v.pin.x + 60), 0, v.pin.z);
   else if (ab) {
-    const away = v().set(pin.x - CATCH.x, 0, pin.z - CATCH.z);
+    const away = new Vector3(v.pin.x - CATCH.x, 0, v.pin.z - CATCH.z);
     if (away.lengthSq() < 1) away.set(1, 0, 0);
-    away.normalize();
-    target = v().set(CATCH.x, 0, CATCH.z).addScaledVector(away, Math.max(320, dTower + 40));
+    const dTower = away.length();
+    t.addScaledVector(away.normalize(), Math.max(320, dTower + 40));
   }
-  const toT = v().set(target.x - pin.x, 0, target.z - pin.z);
-  const d = toT.length();
-  const dir = d > 0 ? toT.clone().divideScalar(d) : v();
+  const to = new Vector3(t.x - v.pin.x, 0, t.z - v.pin.z);
+  const d = to.length();
+  return { d, dir: d > 0 ? to.divideScalar(d) : to };
+}
 
-  g.stick = null;
+/** Belly-flop: aim the nose, pitch down to glide or up to brake, to arrive ~120 m short of the target. */
+function glide(v: View, g: Guide, d: number, dir: Vector3) {
+  const l = Math.hypot(v.A.x, v.A.z) || 1;
+  const heading = deg(Math.atan2((v.A.z * dir.x - v.A.x * dir.z) / l, (v.A.x * dir.x + v.A.z * dir.z) / l));
+  const tLeft = Math.max(1, (v.alt - FLIP_ALT) / Math.max(v.vs, 1));
+  const need = clamp((d - (g.abort ? 0 : ENTRY)) / tLeft, -15, 40);
+  const pitch = clamp(need * 0.6 + (need - v.vh.dot(dir)) * 0.6, -25, 25);
+  return { x: -heading / 35, y: pitch / deg(BELLY_PITCH) };
+}
+
+/** Upright: lean toward the target (small-angle: tilt = horizontal acceleration / g), descend on a profile. */
+function descend(v: View, g: Guide, d: number, dir: Vector3) {
+  const ab = g.abort;
+  const over = ab ? (ab.mode === 'ocean' ? v.pin.x > shoreX(v.pin.z) + 40 : d < 60) : false;
+  const toOcean = ab?.mode === 'ocean' && !over;
+  const h = ab ? v.base.y : v.hArm;
+  // target descent rate: 2 m/s² braking profile, easing to ~1 m/s for the last metres onto the arms
+  let vt = h > 0 ? clamp(Math.min(Math.sqrt(4 * h), 1 + 0.25 * h), 1, 60) : 0;
+  // close to the arms, creep down until lined up and steady, as a pilot would
+  if (!ab && h < 60 && (d > 1.5 || v.vh.length() > 1.2)) vt = Math.min(vt, 0.3 + Math.max(0, h - 10) * 0.1);
+  if (toOcean) vt = clamp(Math.min(vt, h / Math.max(1, d / 22)), 2, 60); // slow down to buy time
+  const ah = dir.clone().multiplyScalar(clamp(d * 0.18, 0, toOcean ? 28 : ab ? 14 : 7)).sub(v.vh).multiplyScalar(0.35);
+  if (over) ah.copy(v.vh).multiplyScalar(-0.4);
+  const fwd = new Vector3(v.BZ.x, 0, v.BZ.z).normalize(), side = new Vector3(v.BX.x, 0, v.BX.z).normalize();
+  const k = 1 / (G0 * Math.tan(MAX_TILT));
+  const aNeed = G0 + 1.5 * (v.vs - vt); // gentle enough for a player's reaction time
+  return {
+    stick: { x: ah.dot(side) * k, y: ah.dot(fwd) * k },
+    throttle: clamp((aNeed * v.mass) / Math.max(0.5, Math.cos((v.tilt * Math.PI) / 180)) / MAX_THRUST, 0.05, 1),
+  };
+}
+
+/** Updates `g` with the next suggested inputs. Called ten times a second. */
+export function updateGuide(s: ShipState, g: Guide) {
+  const v = look(s);
+  const belly = s.ref === 'belly' && !v.lit;
+  assess(s, v, g, belly);
+  const { d, dir } = targetOf(v, g);
+  let stick: { x: number; y: number };
   g.throttle = null;
 
-  // Rotate the nose toward world direction n.
-  const stickToward = (n: Vector3) => {
-    const axis = v().crossVectors(A, n);
-    const k = 1.6 / MAX_RATE;
-    g.stick = { x: clamp(axis.dot(BZ) * k, -1, 1), y: clamp(axis.dot(BX) * k, -1, 1) };
-  };
-
-  if (belly) {
-    if (alt < FLIP_ALT + 60) {
-      g.phase = 'light';
-      g.throttle = 0.15;
-      g.stick = { x: 0, y: 0 };
-    } else {
-      g.phase = 'glide';
-      // aim the nose, then pitch down to glide (or up to brake) so we arrive ~120 m short of the target
-      const l = Math.hypot(A.x, A.z) || 1;
-      const ang = (Math.atan2((A.z * dir.x - A.x * dir.z) / l, (A.x * dir.x + A.z * dir.z) / l) * 180) / Math.PI;
-      const tLeft = Math.max(1, (alt - FLIP_ALT) / Math.max(vs, 1));
-      const need = clamp((d - (ab ? 0 : 120)) / tLeft, -15, 40);
-      const cur = vh.dot(dir);
-      const pitchDown = (Math.asin(clamp(-A.y, -1, 1)) * 180) / Math.PI;
-      const pitchWanted = clamp(need * 0.6 + (need - cur) * 0.6, -25, 25);
-      g.stick = { x: clamp(-ang / 12, -1, 1), y: clamp((pitchWanted - pitchDown) / 8, -1, 1) };
-    }
-  } else if (!g.upright) {
-    g.phase = 'flip';
-    if (!lit) g.throttle = 0.2;
-    else {
-      // swing upright, leaning back against sideways drift so the flip does not throw us forward
-      const lean = vh.clone().multiplyScalar(-1 / 40);
-      if (lean.length() > 0.35) lean.setLength(0.35);
-      stickToward(v().set(lean.x, 1, lean.z).normalize());
-      const h = Math.max(1, ab ? base.y : hArm);
-      const aReq = (vs * vs) / (2 * h);
-      g.throttle = aReq > 3 ? clamp(((aReq + G0) * m) / MAX_THRUST, 0.15, 1) : 0.15;
-      if (tilt < 25) g.upright = true;
-    }
-  }
-
-  if (g.upright) {
+  if (s.ref === 'upright') {
     g.phase = 'descend';
-    const over = ab ? (ab.mode === 'ocean' ? pin.x > SHORE_X + 40 : d < 60) : false;
-    const toOcean = ab?.mode === 'ocean' && !over;
-    const h = ab ? base.y : hArm;
-    let vt = h > 0 ? clamp(Math.sqrt(2 * 2 * h), 1, 60) : 0; // target descent rate
-    if (toOcean) vt = clamp(Math.min(vt, h / Math.max(1, d / 22)), 2, 60); // slow down to buy time
-    const ah = dir.clone().multiplyScalar(clamp(d * 0.25, 0, toOcean ? 28 : ab ? 14 : 9)).sub(vh).multiplyScalar(0.4);
-    if (over) ah.copy(vh).multiplyScalar(-0.4);
-    const cap = toOcean ? 5 : 3.4;
-    if (ah.length() > cap) ah.setLength(cap);
-    stickToward(v().set(ah.x / 9.81, 1, ah.z / 9.81).normalize());
-    const aNeed = G0 + 2.5 * (vs - vt);
-    g.throttle = clamp((aNeed * m) / Math.max(0.5, Math.cos((tilt * Math.PI) / 180)) / MAX_THRUST, 0.05, 1);
+    const r = descend(v, g, d, dir);
+    stick = r.stick;
+    g.throttle = r.throttle;
+  } else if (v.lit || v.alt < FLIP_ALT + 60) {
+    // light the Raptors, then hold the stick back until the Ship is upright
+    const spun = v.lit && s.spool > 0.3;
+    g.phase = spun ? 'flip' : 'light';
+    stick = { x: 0, y: spun ? -GATE : 0 };
+    const h = Math.max(1, g.abort ? v.base.y : v.hArm);
+    const aReq = (v.vs * v.vs) / (2 * h);
+    // minimum thrust until the nose is well up, or the burn would push the Ship forward
+    g.throttle = aReq > 3 && spun && v.tilt < 45 ? clamp(((aReq + G0) * v.mass) / MAX_THRUST, 0.15, 1) : 0.15;
+  } else {
+    g.phase = 'glide';
+    stick = glide(v, g, d, dir);
   }
-
-  // without fly-by-wire the stick is raw torque: turn the rate cue into a torque cue
-  if (!fbw && g.stick) {
-    g.stick = {
-      x: clamp((g.stick.x * MAX_RATE - s.w.z) * 4, -1, 1),
-      y: clamp((g.stick.y * MAX_RATE - s.w.x) * 4, -1, 1),
-    };
-  }
+  g.stick = inGate(stick.x, stick.y, GATE);
 }

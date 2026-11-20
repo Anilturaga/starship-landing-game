@@ -1,7 +1,8 @@
 import { Matrix4, Quaternion, Vector3 } from 'three';
 import type { SiteWorld } from './world';
+import { desiredRates, updateReference, type Law, type Reference } from './control';
 import {
-  DRY_MASS, FLAP_GAIN, FLAP_RATE, G0, GIMBAL_MAX, HALF, LENGTH, MAX_RATE, MIN_THROTTLE, RADIUS,
+  DRY_MASS, FLAP_GAIN, FLAP_RATE, G0, GIMBAL_MAX, HALF, LENGTH, MIN_THROTTLE, RADIUS,
   RAPTOR_MDOT, RAPTOR_THRUST, RCS_TORQUE, RHO0, SCALE_HEIGHT, SL_ENGINES, SPIN_DOWN_S, SPIN_UP_S,
   START, THROTTLE_OFF,
 } from './constants';
@@ -35,6 +36,8 @@ export interface ShipState {
   /** Stick, -1..1. x = lateral (right +), y = pitch (forward/nose-down +). */
   inp: { x: number; y: number };
   spool: number; // 0..1 engine spin-up
+  /** Which attitude the fly-by-wire flies the stick against (latched: belly → flip → upright). */
+  ref: Reference;
   flaps: number[]; // fold angle per FLAPS entry, rad
   // Derived each step (read by HUD, visuals and guidance)
   engines: number; // lit engine count
@@ -47,7 +50,7 @@ export interface ShipState {
 }
 
 export interface Env {
-  fbw: boolean;
+  law: Law;
   wind: [number, number, number];
 }
 
@@ -67,6 +70,7 @@ export function createShip(propellant: number): ShipState {
     thr: 0,
     inp: { x: 0, y: 0 },
     spool: 0,
+    ref: 'belly',
     flaps: FLAPS.map(() => FLAP_NEUTRAL),
     engines: 0,
     perEngine: 0,
@@ -96,7 +100,7 @@ export function windAt(t: number, wind: Env['wind'], out = new Vector3()) {
 
 const ax = { x: new Vector3(), y: new Vector3(), z: new Vector3() };
 const VR = new Vector3(), VP = new Vector3(), F = new Vector3(), W = new Vector3();
-const TQ = new Vector3(), INERTIA = new Vector3();
+const TQ = new Vector3(), INERTIA = new Vector3(), RATES = { x: 0, z: 0 };
 
 /**
  * Advance one fixed step: compute the bespoke forces (aero, Raptors, gimbal, flaps, RCS) and let
@@ -137,12 +141,10 @@ export function physStep(s: ShipState, dt: number, env: Env, world: SiteWorld) {
   const avail = aF + aG + RCS_TORQUE;
   const Ip = m * (LENGTH * LENGTH / 12 + RADIUS * RADIUS / 4);
   const Ir = (m * RADIUS * RADIUS) / 2;
-  const px = s.inp.y, pz = s.inp.x;
-  let tx: number, tz: number;
-  if (env.fbw) { tx = Ip * 3 * (px * MAX_RATE - s.w.x); tz = Ip * 3 * (pz * MAX_RATE - s.w.z); }
-  else { tx = px * avail; tz = pz * avail; }
-  tx = clamp(tx, -avail, avail);
-  tz = clamp(tz, -avail, avail);
+  updateReference(s, (Math.acos(clamp(A.y, -1, 1)) * 180) / Math.PI);
+  const r = desiredRates(s, env.law, RATES);
+  const tx = clamp(Ip * 3 * (r.x - s.w.x), -avail, avail);
+  const tz = clamp(Ip * 3 * (r.z - s.w.z), -avail, avail);
   const rollLim = RCS_TORQUE + aF * 0.3;
   const ty = clamp(Ir * 3 * -s.w.y, -rollLim, rollLim); // roll is always held
   const ux = tx / avail, uz = tz / avail;

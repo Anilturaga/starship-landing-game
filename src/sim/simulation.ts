@@ -6,7 +6,7 @@ import { createShip, physStep, type ShipState } from './physics';
 import { Vector3 } from 'three';
 import { SiteWorld } from './world';
 
-const GUIDE_PERIOD = 0.2; // s of sim time between flight-computer updates
+const GUIDE_PERIOD = 0.1; // s of sim time between flight-computer updates
 export const SPEEDS = [1, 0.5, 0.25] as const;
 
 /**
@@ -55,7 +55,7 @@ export class Simulation {
   step() {
     if (this.outcome) return;
     const s = this.ship;
-    const hits = physStep(s, STEP, { fbw: this.mode.fbw, wind: this.mode.wind }, this.world);
+    const hits = physStep(s, STEP, { law: this.mode.law, wind: this.mode.wind }, this.world);
     if (s.prop <= 0) s.thr = 0;
     const out = judge(s, hits, this.mode.limits);
     if (out) {
@@ -77,7 +77,7 @@ export class Simulation {
   runGuide() {
     const needed = this.mode.guides || this.mode.autoThrottle;
     if (!needed) return;
-    updateGuide(this.ship, this.guide, this.mode.fbw);
+    updateGuide(this.ship, this.guide);
     if (this.mode.autoThrottle) this.ship.thr = this.guide.throttle ?? 0;
   }
 
@@ -102,7 +102,7 @@ export class Simulation {
     const s = this.ship;
     const pin = pinPos(s, this.pin);
     const dTower = Math.hypot(pin.x - CATCH.x, pin.z - CATCH.z);
-    this.autoSlow = this.mode.autoSlowMo && !this.speedTouched && this.guide.upright && !this.guide.abort
+    this.autoSlow = this.mode.autoSlowMo && !this.speedTouched && this.ship.ref === 'upright' && !this.guide.abort
       && pin.y - ARM_Y < 220 && dTower < 90 && !this.outcome;
     const want = this.autoSlow ? 0.5 : SPEEDS[this.speedIndex];
     this.timeScale += (want - this.timeScale) * Math.min(1, dt * 3);

@@ -1,6 +1,6 @@
 import { Canvas, useFrame } from '@react-three/fiber';
-import { useMemo, useRef } from 'react';
-import { Color, DirectionalLight } from 'three';
+import { Suspense, useMemo, useRef } from 'react';
+import { Color, DirectionalLight, Quaternion, Vector3 } from 'three';
 import { applyInput } from '../state/input';
 import { useGame } from '../state/store';
 import { CameraRig } from './CameraRig';
@@ -27,21 +27,31 @@ function SimDriver() {
   return null;
 }
 
+const SHADOW_HALF = 70, SHADOW_RES = 2048, TEXEL = (2 * SHADOW_HALF) / SHADOW_RES;
+const fromLight = new Quaternion().setFromUnitVectors(new Vector3(0, 0, 1), SUN_DIR);
+const toLight = fromLight.clone().invert();
+const snapped = new Vector3();
+
 /** Sun with a shadow box that follows the Ship. */
 function Sun() {
   const ref = useRef<DirectionalLight>(null);
   useFrame(() => {
     const s = useGame.getState().sim.ship;
     const l = ref.current!;
-    l.position.copy(s.pos).addScaledVector(SUN_DIR, 600);
-    l.target.position.copy(s.pos);
+    // follow the Ship in whole shadow-map texels, so shadow edges do not shimmer as it moves
+    snapped.copy(s.pos).applyQuaternion(toLight);
+    snapped.x = Math.round(snapped.x / TEXEL) * TEXEL;
+    snapped.y = Math.round(snapped.y / TEXEL) * TEXEL;
+    snapped.applyQuaternion(fromLight);
+    l.position.copy(snapped).addScaledVector(SUN_DIR, 600);
+    l.target.position.copy(snapped);
     l.target.updateMatrixWorld();
   });
   return (
     <directionalLight
       ref={ref} color={0xfff0d8} intensity={2.6 / EXPOSURE} castShadow
-      shadow-mapSize={[2048, 2048]} shadow-bias={-0.0004}
-      shadow-camera-left={-70} shadow-camera-right={70} shadow-camera-top={70} shadow-camera-bottom={-70}
+      shadow-mapSize={[SHADOW_RES, SHADOW_RES]} shadow-bias={-0.0003} shadow-normalBias={0.04}
+      shadow-camera-left={-SHADOW_HALF} shadow-camera-right={SHADOW_HALF} shadow-camera-top={SHADOW_HALF} shadow-camera-bottom={-SHADOW_HALF}
       shadow-camera-near={1} shadow-camera-far={1400}
     />
   );
@@ -61,7 +71,9 @@ export function GameScene() {
       <Sky />
       <Sun />
       <hemisphereLight args={[0xbcd4f0, 0x4d4636, 0.35 / EXPOSURE]} />
-      <World />
+      <Suspense fallback={null}>
+        <World />
+      </Suspense>
       <Ship />
       <CameraRig />
     </Canvas>
