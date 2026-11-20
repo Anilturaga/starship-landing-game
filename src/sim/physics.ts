@@ -1,4 +1,5 @@
 import { Matrix4, Quaternion, Vector3 } from 'three';
+import type { SiteWorld } from './world';
 import {
   DRY_MASS, FLAP_GAIN, FLAP_RATE, G0, GIMBAL_MAX, HALF, LENGTH, MAX_RATE, MIN_THROTTLE, RADIUS,
   RAPTOR_MDOT, RAPTOR_THRUST, RCS_TORQUE, RHO0, SCALE_HEIGHT, SL_ENGINES, SPIN_DOWN_S, SPIN_UP_S,
@@ -94,11 +95,14 @@ export function windAt(t: number, wind: Env['wind'], out = new Vector3()) {
 }
 
 const ax = { x: new Vector3(), y: new Vector3(), z: new Vector3() };
-const VR = new Vector3(), VP = new Vector3(), F = new Vector3(), W = new Vector3(), AXIS = new Vector3();
-const DQ = new Quaternion();
+const VR = new Vector3(), VP = new Vector3(), F = new Vector3(), W = new Vector3();
+const TQ = new Vector3(), INERTIA = new Vector3();
 
-/** Advance one fixed step. Pure function of (state, dt, env); mutates `s`. */
-export function physStep(s: ShipState, dt: number, env: Env) {
+/**
+ * Advance one fixed step: compute the bespoke forces (aero, Raptors, gimbal, flaps, RCS) and let
+ * Rapier integrate them. Mutates `s` and returns what the Ship is touching.
+ */
+export function physStep(s: ShipState, dt: number, env: Env, world: SiteWorld) {
   s.t += dt;
   const { x: BX, y: A, z: BZ } = bodyAxes(s.q, ax);
   const m = DRY_MASS + s.prop;
@@ -111,7 +115,7 @@ export function physStep(s: ShipState, dt: number, env: Env) {
   VP.copy(VR).addScaledVector(A, -va);
   const vpm = VP.length();
   const flapExt = s.flaps.reduce((a, d) => a + (1 - d / 1.4), 0) / s.flaps.length;
-  F.set(0, -G0 * m, 0);
+  F.set(0, 0, 0); // gravity is applied by Rapier
   F.addScaledVector(VP, -0.5 * rho * 0.8 * (2 * RADIUS * LENGTH + 60 * flapExt) * vpm);
   F.addScaledVector(A, -0.5 * rho * 0.45 * Math.PI * RADIUS * RADIUS * Math.abs(va) * va);
 
@@ -159,18 +163,8 @@ export function physStep(s: ShipState, dt: number, env: Env) {
     s.flaps[i] += clamp(target - s.flaps[i], -FLAP_RATE * dt, FLAP_RATE * dt);
   }
 
-  // --- integrate rotation (aerodynamic rate damping from crossflow)
+  // --- hand the forces to Rapier (aerodynamic rate damping from crossflow goes in the torque)
   const kd = rho * 0.8 * 2 * RADIUS * vpm * (LENGTH ** 3 / 12);
-  s.w.x += ((tx - kd * s.w.x) / Ip) * dt;
-  s.w.y += (ty / Ir) * dt;
-  s.w.z += ((tz - kd * s.w.z) / Ip) * dt;
-  const wl = s.w.length();
-  if (wl > 1e-9) {
-    DQ.setFromAxisAngle(AXIS.copy(s.w).divideScalar(wl), wl * dt);
-    s.q.multiply(DQ).normalize();
-  }
-
-  // --- integrate translation
-  s.vel.addScaledVector(F, dt / m);
-  s.pos.addScaledVector(s.vel, dt);
+  TQ.set(tx - kd * s.w.x, ty, tz - kd * s.w.z).applyQuaternion(s.q);
+  return world.step(s, F, TQ, m, INERTIA.set(Ip, Ir, Ip));
 }

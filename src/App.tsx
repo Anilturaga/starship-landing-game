@@ -1,3 +1,4 @@
+import { useGesture } from '@use-gesture/react';
 import { useEffect, useRef, useState } from 'react';
 import { GameScene } from './scene/GameScene';
 import { input, toggleEngines } from './state/input';
@@ -34,54 +35,40 @@ function useKeyboard() {
 }
 
 /** Drag to orbit (chase) or look around (other cameras); pinch or wheel to zoom; double-tap to reset. */
-function useCameraDrag() {
-  const ptrs = useRef(new Map<number, { x: number; y: number }>());
-  const pinch = useRef(0);
+function useCameraGestures() {
   const lastTap = useRef(0);
   const zoom = (f: number) => {
     if (useGame.getState().camera === 0) view.orbit.dist = clamp(view.orbit.dist * f, 25, 600);
     else view.zoom = clamp(view.zoom * f, 0.3, 1.5);
   };
-  return {
-    onPointerDown: (e: React.PointerEvent) => {
-      (e.target as Element).setPointerCapture(e.pointerId);
-      ptrs.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
-      if (ptrs.current.size === 1) {
-        if (e.timeStamp - lastTap.current < 300) view.reset();
-        lastTap.current = e.timeStamp;
-      }
-      if (ptrs.current.size === 2) { const [a, b] = [...ptrs.current.values()]; pinch.current = Math.hypot(a.x - b.x, a.y - b.y); }
+  return useGesture(
+    {
+      onDrag: ({ delta: [dx, dy], tap, pinching, timeStamp }) => {
+        if (tap) {
+          if (timeStamp - lastTap.current < 300) view.reset();
+          lastTap.current = timeStamp;
+          return;
+        }
+        if (pinching) return;
+        if (useGame.getState().camera === 0) {
+          view.orbit.auto = false;
+          view.orbit.yaw -= dx * 0.006;
+          view.orbit.pitch = clamp(view.orbit.pitch + dy * 0.005, -0.6, 1.4);
+        } else {
+          view.look.yaw = clamp(view.look.yaw - dx * 0.004, -1.4, 1.4);
+          view.look.pitch = clamp(view.look.pitch - dy * 0.004, -0.9, 0.9);
+        }
+      },
+      onPinch: ({ delta: [ds] }) => zoom(Math.exp(-ds)),
+      onWheel: ({ delta: [, dy] }) => zoom(Math.exp(dy * 0.001)),
     },
-    onPointerMove: (e: React.PointerEvent) => {
-      const p = ptrs.current.get(e.pointerId);
-      if (!p) return;
-      const dx = e.clientX - p.x, dy = e.clientY - p.y;
-      p.x = e.clientX; p.y = e.clientY;
-      if (ptrs.current.size === 2) {
-        const [a, b] = [...ptrs.current.values()];
-        const d = Math.hypot(a.x - b.x, a.y - b.y);
-        if (pinch.current > 0) zoom(pinch.current / d);
-        pinch.current = d;
-        return;
-      }
-      if (useGame.getState().camera === 0) {
-        view.orbit.auto = false;
-        view.orbit.yaw -= dx * 0.006;
-        view.orbit.pitch = clamp(view.orbit.pitch + dy * 0.005, -0.6, 1.4);
-      } else {
-        view.look.yaw = clamp(view.look.yaw - dx * 0.004, -1.4, 1.4);
-        view.look.pitch = clamp(view.look.pitch - dy * 0.004, -0.9, 0.9);
-      }
-    },
-    onPointerUp: (e: React.PointerEvent) => { ptrs.current.delete(e.pointerId); if (ptrs.current.size < 2) pinch.current = 0; },
-    onPointerCancel: (e: React.PointerEvent) => { ptrs.current.delete(e.pointerId); pinch.current = 0; },
-    onWheel: (e: React.WheelEvent) => zoom(Math.exp(e.deltaY * 0.001)),
-  };
+    { drag: { filterTaps: true } },
+  );
 }
 
 export default function App() {
   useKeyboard();
-  const drag = useCameraDrag();
+  const gestures = useCameraGestures();
   const screen = useGame((s) => s.screen);
   const camera = useGame((s) => s.camera);
   const [hint, setHint] = useState(false);
@@ -93,7 +80,7 @@ export default function App() {
   }, [screen]);
   return (
     <>
-      <div className="stage" {...drag} onPointerDownCapture={() => setHint(false)}>
+      <div className="stage" {...gestures()} onPointerDownCapture={() => setHint(false)}>
         <GameScene />
       </div>
       <div className={`vig${camera === 2 || camera === 3 ? ' on' : ''}`} />

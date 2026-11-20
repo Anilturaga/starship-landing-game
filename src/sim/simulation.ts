@@ -1,9 +1,10 @@
 import { ARM_Y, CATCH, STEP } from './constants';
 import { createGuide, updateGuide, type Guide } from './guidance';
 import type { Mode } from './modes';
-import { checkContact, pinPos, type Outcome } from './outcome';
+import { judge, pinPos, type Outcome } from './outcome';
 import { createShip, physStep, type ShipState } from './physics';
 import { Vector3 } from 'three';
+import { SiteWorld } from './world';
 
 const GUIDE_PERIOD = 0.2; // s of sim time between flight-computer updates
 export const SPEEDS = [1, 0.5, 0.25] as const;
@@ -15,6 +16,8 @@ export const SPEEDS = [1, 0.5, 0.25] as const;
 export class Simulation {
   readonly mode: Mode;
   ship: ShipState;
+  /** Rapier world: integrates the Ship and detects contacts. Needs initPhysics() first. */
+  private world = new SiteWorld();
   guide: Guide = createGuide();
   outcome: Outcome | null = null;
   running = false;
@@ -28,13 +31,11 @@ export class Simulation {
 
   private acc = 0;
   private guideClock = 0;
-  private prevPinY = Infinity;
   private pin = new Vector3();
 
   constructor(mode: Mode) {
     this.mode = mode;
     this.ship = createShip(mode.propellant);
-    this.prevPinY = pinPos(this.ship, this.pin).y;
   }
 
   /** Throttle the player asks for; ignored when the flight computer owns the throttle. */
@@ -54,16 +55,13 @@ export class Simulation {
   step() {
     if (this.outcome) return;
     const s = this.ship;
-    physStep(s, STEP, { fbw: this.mode.fbw, wind: this.mode.wind });
+    const hits = physStep(s, STEP, { fbw: this.mode.fbw, wind: this.mode.wind }, this.world);
     if (s.prop <= 0) s.thr = 0;
-    const out = checkContact(s, this.prevPinY, this.mode.limits);
-    this.prevPinY = pinPos(s, this.pin).y;
+    const out = judge(s, hits, this.mode.limits);
     if (out) {
       this.outcome = out;
       s.thr = 0;
-      if (out.kind === 'caught') {
-        s.pos.y += ARM_Y - this.pin.y; // rest the pins on the arms
-      }
+      if (out.kind === 'caught') s.pos.y += ARM_Y - pinPos(s, this.pin).y; // rest the pins on the arms
       s.vel.set(0, 0, 0);
       s.w.set(0, 0, 0);
       return;
@@ -81,6 +79,11 @@ export class Simulation {
     if (!needed) return;
     updateGuide(this.ship, this.guide, this.mode.fbw);
     if (this.mode.autoThrottle) this.ship.thr = this.guide.throttle ?? 0;
+  }
+
+  /** Release the Rapier world (WebAssembly memory). */
+  dispose() {
+    this.world.free();
   }
 
   /** Advance by real elapsed time (seconds), honouring slow motion. */

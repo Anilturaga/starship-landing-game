@@ -36,6 +36,7 @@ export const useGame = create<GameState>((set, get) => ({
   start: (mode) => {
     const modeId = mode ?? get().modeId;
     try { localStorage.setItem('catchMode', modeId); } catch { /* ignore */ }
+    get().sim.dispose();
     const sim = new Simulation(MODES[modeId]);
     sim.running = true;
     sim.runGuide();

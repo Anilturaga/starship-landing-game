@@ -69,7 +69,7 @@ function flapGeometry(len: number, w: number) {
 /** Procedural V3 Ship: steel leeward side, black tiled belly, four flaps, 3 sea-level + 3 vacuum Raptors. */
 function buildShip(): ShipParts {
   const root = new Group();
-  const steel = new MeshStandardMaterial({ color: 0xe6e9ec, metalness: 1, roughness: 0.75, roughnessMap: steelRoughness(), envMapIntensity: 1.1 });
+  const steel = new MeshStandardMaterial({ color: 0xc4c9ce, metalness: 1, roughness: 0.6, roughnessMap: steelRoughness(), envMapIntensity: 0.7 });
   const tiles = new MeshStandardMaterial({ map: tileTexture(), metalness: 0.05, roughness: 0.82 });
   const dark = new MeshStandardMaterial({ color: 0x1b1c1f, metalness: 0.15, roughness: 0.8, side: DoubleSide });
   const pinMat = new MeshStandardMaterial({ color: 0x8d9298, metalness: 0.75, roughness: 0.4 });
@@ -182,7 +182,7 @@ export function Ship() {
       (e.glow.material as SpriteMaterial).opacity = k * 0.9;
       e.glow.scale.setScalar(5 + 4 * s.perEngine);
     });
-    light.intensity = burning ? s.spool * s.engines * 4000 : 0;
+    light.intensity = burning ? s.spool * s.engines * 9000 : 0;
 
     // explosion or splash when the flight ends badly
     const lost = out && out.kind !== 'caught' && out.kind !== 'ground';
@@ -200,7 +200,7 @@ export function Ship() {
       boom.scale.setScalar(20 + t * 90);
       (boom.material as SpriteMaterial).opacity = Math.max(0, 1 - t / 1.6);
       boomLight.position.copy(boom.position);
-      boomLight.intensity = Math.max(0, 6e5 * (1 - t / 1.6));
+      boomLight.intensity = Math.max(0, 1.3e6 * (1 - t / 1.6));
       if (t > 1.6) boomState.t = -1;
     }
   });

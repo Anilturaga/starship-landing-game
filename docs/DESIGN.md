@@ -18,14 +18,20 @@ This document records what was decided and why. The `prototype/` HTML file that 
 - **Vite + React 19 + TypeScript.**
 - **React Three Fiber + drei** for rendering. Declarative scene, with drei's environment lighting and helpers keeping the code small.
 - **Zustand** for game state: screen, mode, camera and outcome. Per-frame data (telemetry, cues) is read straight from the simulation object, never pushed through React state at frame rate.
-- **Own flight model** in `src/sim/` (plain TypeScript, no rendering imports beyond three's math types). It runs headless, so the whole game can be tested in Node.
+- **Rapier** (`@dimforge/rapier3d-compat`) integrates the Ship as a rigid body and detects contacts.
+- **Own force model** in `src/sim/` (plain TypeScript): aerodynamics, Raptors, gimbal, flaps and RCS. Nothing off the shelf models a belly-flopping rocket, so this part is bespoke. It runs headless, so whole flights are tested in Node.
+- **drei** `<Sky>` (physically based Preetham sky), also baked into reflections with `<Environment>`.
+- **@use-gesture** for camera drag, pinch and wheel; **Phosphor** for icons.
+- **vite-plugin-singlefile**: `npm run build:html` writes one self-contained `dist-html/index.html` (JS, CSS and Rapier's WebAssembly inlined). That file is what gets published for testing.
 - **Vitest** for the flight tests.
 
-### Physics engine: why not Rapier yet
+The rule: use a library wherever one fits, and write code only for what is specific to Starship.
 
-Rapier was the planned rigid-body engine (it beat Havok on determinism, snapshot/restore and renderer independence). In practice, everything that makes this game feel real is a force we compute ourselves: thrust and gimbal, flap and body aerodynamics, propellant mass, and the flight computer. The only contacts are the pins on the arms, the tower, the mount, the ground and the water, and simple geometric checks cover those well.
+### Physics: what Rapier does and what we do
 
-So the first build uses a small fixed-step 6-DOF integrator (`physStep`, 120 Hz) and keeps Rapier for when contact physics becomes the point: pins sliding on the arm rails, the vehicle tipping in the arms, or debris. The simulation API (`Simulation.step`) was shaped so that swap only touches `src/sim/`.
+Rapier owns integration (mass, inertia, gravity, forces and torques to motion) and collision detection. Each step, `physStep` computes the forces, and `SiteWorld.step` hands them to Rapier, steps the world and reads the body back. The Ship's colliders are sensors: a hull cylinder that touches the tower, mount and surface, and a pin bar that touches only a catch zone on top of the arms (collision groups keep them apart). `judge()` turns what they touch into an outcome. Mass and inertia are updated every step as propellant burns.
+
+The game state (`ShipState`) stays the source of truth and is written into the body each step, so tests and the flight computer can move the Ship freely. Real contact response (pins sliding on the rails, tipping in the arms) is the next step: make the colliders solid instead of sensors.
 
 ## Flight model (`src/sim/physics.ts`)
 
@@ -40,7 +46,7 @@ Body frame: +Y nose, +Z the tiled belly, +X completes the set. Units are SI.
 | Spin-up / shutdown | 1.5 s / 0.35 s | relights are not instant |
 | Air density | 1.225 · e^(−h/8500) | exponential atmosphere |
 
-Forces each step:
+Forces each step (Rapier integrates them):
 
 - **Crossflow drag.** The hull is treated as a cylinder in crossflow, plus extra area from extended flaps. This produces the belly-flop's terminal speed of about 85 m/s. Tilting the nose turns some of that drag sideways, which is how the Ship glides.
 - **Axial drag** along the body.
@@ -149,7 +155,7 @@ Losses report whether the site is safe (more than 150 m from the tower).
 1. **Start higher.** Start at 10–15 km, with time compression in the quiet part of the fall.
 2. **Realism pass on assets.** Real sky photos (HDRI) and terrain textures from CC0 libraries (Poly Haven, ambientCG), a better tower model, and RCS puffs.
 3. **Sound.** Wind roar that scales with dynamic pressure, Raptor ignition and rumble, and arm contact.
-4. **Rapier for the catch.** Pins on the arm rails and tipping.
+4. **Solid catch contacts.** Rapier is in; make the pin and arm colliders solid so the Ship slides on the rails and can tip.
 5. **Replays and ghost runs.** Deterministic stepping is already in place; this needs input recording.
-6. **Performance.** Split the 345 kB gzipped bundle, add a quality setting for low-end phones, and lazy-load the scene behind the menu.
+6. **Performance.** The single-file build is 5.6 MB (2 MB gzipped), mostly Rapier's inlined WebAssembly. Add a quality setting for low-end phones.
 7. **Open questions.** Scoring beyond pass/fail (propellant left, precision)? Daily-challenge seeds for wind?

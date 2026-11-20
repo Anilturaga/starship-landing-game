@@ -3,6 +3,7 @@ import { DRY_MASS, G0, THROTTLE_OFF } from '../sim/constants';
 import { CAMERAS, useGame } from '../state/store';
 import { input } from '../state/input';
 import { useTicker } from './useTicker';
+import { CaretDoubleDown, CaretDoubleUp, CaretDown, CaretUp, Circle, List, Timer, VideoCamera, WarningOctagon } from '@phosphor-icons/react';
 
 const clamp = (v: number, a: number, b: number) => Math.min(b, Math.max(a, v));
 
@@ -117,7 +118,8 @@ function Scopes({ c }: { c: ReturnType<typeof readControls> }) {
       )}
       {c.thrCue && (
         <div className={`tcue${ab}`} aria-hidden="true">
-          {dT > 0.12 ? '▲▲' : dT > 0.04 ? '▲' : dT < -0.12 ? '▼▼' : dT < -0.04 ? '▼' : '●'}
+          {dT > 0.12 ? <CaretDoubleUp weight="bold" /> : dT > 0.04 ? <CaretUp weight="bold" />
+            : dT < -0.12 ? <CaretDoubleDown weight="bold" /> : dT < -0.04 ? <CaretDown weight="bold" /> : <Circle weight="fill" size="0.7em" />}
         </div>
       )}
     </>
@@ -134,7 +136,7 @@ export function Controls() {
     <>
       {c.abort && (
         <div className="callout crit" role="status">
-          <i />
+          <WarningOctagon weight="fill" size={18} className="ico" />
           <div>
             {c.abort.mode === 'ocean' ? 'Abort: head for the ocean' : 'Abort: steer clear of the tower'}
             <small>{c.abort.why}</small>
@@ -145,9 +147,9 @@ export function Controls() {
       <Scopes c={c} />
       <Throttle c={c} />
       <div className="chips">
-        <button className="chip" onClick={() => setCamera(camera + 1)} aria-label="Next camera"><span>Cam</span><b>{CAMERAS[camera]}</b></button>
-        <button className="chip" onClick={() => useGame.getState().sim.cycleSpeed()} aria-label="Game speed"><span>Speed</span><b>{c.speed}</b></button>
-        <button className="chip" onClick={openMenu} aria-label="Menu"><b>☰</b></button>
+        <button className="chip" onClick={() => setCamera(camera + 1)} aria-label="Next camera"><VideoCamera size={16} /><b>{CAMERAS[camera]}</b></button>
+        <button className="chip" onClick={() => useGame.getState().sim.cycleSpeed()} aria-label="Game speed"><Timer size={16} /><b>{c.speed}</b></button>
+        <button className="chip" onClick={openMenu} aria-label="Menu"><List size={16} weight="bold" /></button>
       </div>
     </>
   );

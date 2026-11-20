@@ -1,7 +1,8 @@
 import { Vector3 } from 'three';
-import { ARM_REACH, ARM_Y, CATCH, HALF, MOUNT, PIN_OFFSET, RADIUS, SHORE_X, TOWER } from './constants';
+import { CATCH, HALF, PIN_OFFSET, SHORE_X } from './constants';
 import type { CatchLimits } from './modes';
 import { bodyAxes, type ShipState } from './physics';
+import type { Hit } from './world';
 
 export type OutcomeKind = 'caught' | 'crash' | 'ground' | 'ocean';
 
@@ -20,7 +21,7 @@ export interface Outcome {
 }
 
 const ax = { x: new Vector3(), y: new Vector3(), z: new Vector3() };
-const base = new Vector3(), nose = new Vector3(), pin = new Vector3();
+const pin = new Vector3();
 
 export function tiltDeg(s: ShipState) {
   const A = bodyAxes(s.q, ax).y;
@@ -35,15 +36,10 @@ export function basePos(s: ShipState, out = new Vector3()) {
   return out.copy(s.pos).addScaledVector(bodyAxes(s.q, ax).y, -HALF);
 }
 
-/**
- * Checks contacts after a step. `prevPinY` is the pin height before the step.
- * Returns an outcome when the flight ends.
- */
-export function checkContact(s: ShipState, prevPinY: number, limits: CatchLimits): Outcome | null {
-  const A = bodyAxes(s.q, ax).y;
-  base.copy(s.pos).addScaledVector(A, -HALF);
-  nose.copy(s.pos).addScaledVector(A, HALF);
-  pin.copy(s.pos).addScaledVector(A, PIN_OFFSET);
+/** Turns what Rapier reports the Ship touching into the end of the flight (or null to keep flying). */
+export function judge(s: ShipState, hits: ReadonlySet<Hit>, limits: CatchLimits): Outcome | null {
+  if (!hits.size) return null;
+  pinPos(s, pin);
   const tilt = tiltDeg(s);
   const offset = Math.hypot(pin.x - CATCH.x, pin.z - CATCH.z);
   const descent = -s.vel.y, sideways = Math.hypot(s.vel.x, s.vel.z);
@@ -52,16 +48,8 @@ export function checkContact(s: ShipState, prevPinY: number, limits: CatchLimits
     siteSafe: kind === 'caught' || kind === 'ocean' || offset > 150,
   });
 
-  // tower structure
-  const tx0 = TOWER.x - TOWER.width / 2 - RADIUS * 0.9, tx1 = TOWER.x + TOWER.width / 2 + RADIUS * 0.9;
-  for (const p of [base, s.pos, pin, nose]) {
-    if (p.x > tx0 && p.x < tx1 && Math.abs(p.z) < TOWER.width / 2 + RADIUS * 0.9 && p.y < TOWER.height) {
-      return end('crash', 'The Ship hit the tower.');
-    }
-  }
-
-  // pins crossing the top of the arms
-  if (prevPinY > ARM_Y && pin.y <= ARM_Y && pin.x > ARM_REACH.x0 - RADIUS && pin.x < ARM_REACH.x1 + RADIUS && Math.abs(pin.z) < 8) {
+  if (hits.has('tower')) return end('crash', 'The Ship hit the tower.');
+  if (hits.has('arms')) {
     if (offset < limits.off && descent < limits.vs && sideways < limits.hs && tilt < limits.tilt) {
       return end('caught', 'The Ship settled onto the arms within limits.');
     }
@@ -72,22 +60,14 @@ export function checkContact(s: ShipState, prevPinY: number, limits: CatchLimits
     if (tilt >= limits.tilt) r.push(`tilted ${tilt.toFixed(0)}°`);
     return end('crash', `The Ship struck the arms: ${r.join(', ')}.`);
   }
+  if (hits.has('mount')) return end('crash', 'The Ship hit the launch mount.');
 
-  // launch mount under the arms
-  if (base.y < MOUNT.top && base.y > 0 && Math.hypot(base.x - CATCH.x, base.z - CATCH.z) < MOUNT.radius) {
-    return end('crash', 'The Ship hit the launch mount.');
+  const speed = s.vel.length();
+  if (s.pos.x > SHORE_X) {
+    return end('ocean', descent < 6
+      ? 'Soft splashdown in the Gulf. The Ship is lost, but the tower and pad are safe.'
+      : `The Ship hit the water at ${speed.toFixed(0)} m/s. It is lost, but the tower and pad are safe.`);
   }
-
-  // water or ground
-  if (Math.min(base.y, nose.y, s.pos.y - RADIUS) <= 0) {
-    const speed = s.vel.length();
-    if (s.pos.x > SHORE_X) {
-      return end('ocean', descent < 6
-        ? 'Soft splashdown in the Gulf. The Ship is lost, but the tower and pad are safe.'
-        : `The Ship hit the water at ${speed.toFixed(0)} m/s. It is lost, but the tower and pad are safe.`);
-    }
-    if (tilt < 10 && speed < 4) return end('ground', 'The Ship touched down upright, but on the ground instead of in the arms.');
-    return end('crash', `The Ship hit the ground at ${speed.toFixed(0)} m/s.`);
-  }
-  return null;
+  if (tilt < 10 && speed < 4) return end('ground', 'The Ship touched down upright, but on the ground instead of in the arms.');
+  return end('crash', `The Ship hit the ground at ${speed.toFixed(0)} m/s.`);
 }

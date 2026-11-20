@@ -8,6 +8,9 @@ import { Ship } from './Ship';
 import { HORIZON, Sky, SUN_DIR } from './Sky';
 import { World } from './World';
 
+/** The physical sky is bright, so the camera exposes down and the lights compensate. */
+const EXPOSURE = 0.45;
+
 /** Advances the simulation every frame and ends the flight a moment after an outcome. */
 function SimDriver() {
   const endTimer = useRef(0);
@@ -36,7 +39,7 @@ function Sun() {
   });
   return (
     <directionalLight
-      ref={ref} color={0xfff0d8} intensity={2.6} castShadow
+      ref={ref} color={0xfff0d8} intensity={2.6 / EXPOSURE} castShadow
       shadow-mapSize={[2048, 2048]} shadow-bias={-0.0004}
       shadow-camera-left={-70} shadow-camera-right={70} shadow-camera-top={70} shadow-camera-bottom={-70}
       shadow-camera-near={1} shadow-camera-far={1400}
@@ -50,14 +53,14 @@ export function GameScene() {
     <Canvas
       shadows
       dpr={[1, 2]}
-      gl={{ antialias: true, logarithmicDepthBuffer: true, powerPreference: 'high-performance' }}
+      gl={{ antialias: true, logarithmicDepthBuffer: true, powerPreference: 'high-performance', toneMappingExposure: EXPOSURE }}
       camera={{ fov: 50, near: 0.05, far: 80000, position: [600, 2600, -100] }}
     >
       <SimDriver />
       <fogExp2 attach="fog" args={[fog, 0.000085]} />
       <Sky />
       <Sun />
-      <hemisphereLight args={[0xbcd4f0, 0x4d4636, 0.35]} />
+      <hemisphereLight args={[0xbcd4f0, 0x4d4636, 0.35 / EXPOSURE]} />
       <World />
       <Ship />
       <CameraRig />

@@ -1,3 +1,4 @@
+import { ArrowCounterClockwise, SlidersHorizontal } from '@phosphor-icons/react';
 import { useGame } from '../state/store';
 
 const TITLES = { caught: 'Caught', ground: 'Landed off target', ocean: 'Aborted to ocean', crash: 'Vehicle lost' } as const;
@@ -29,8 +30,12 @@ export function EndCard() {
         <Stat label="Flight time" value={`${o.time.toFixed(1)} s`} />
       </div>
       <div className="btns">
-        <button className="go" onClick={() => start()}>Fly again</button>
-        <button className="go alt" onClick={openMenu}>Change mode</button>
+        <button className="go" onClick={() => start()}>
+          <ArrowCounterClockwise weight="bold" /> Fly again
+        </button>
+        <button className="go alt" onClick={openMenu}>
+          <SlidersHorizontal weight="bold" /> Change mode
+        </button>
       </div>
     </div>
   );

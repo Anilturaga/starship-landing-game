@@ -26,11 +26,19 @@ The tests fly complete descents headlessly. One pilot does exactly what the flig
 npm run build
 ```
 
+To build one self-contained HTML file (everything inlined, opens straight from disk or as a hosted page):
+
+```bash
+npm run build:html
+```
+
+The output is `dist-html/index.html`.
+
 ## Layout
 
 | Path | What |
 | --- | --- |
-| `src/sim/` | Flight model, flight computer, contacts and game speed. Plain TypeScript that runs in Node. |
+| `src/sim/` | Force model, Rapier world (integration and contacts), flight computer and game speed. Runs in Node. |
 | `src/scene/` | React Three Fiber scene: Ship, launch site, sky and cameras. |
 | `src/ui/` | HUD, thumb controls, menus. |
 | `src/state/` | Zustand store, input and camera-drag state. |

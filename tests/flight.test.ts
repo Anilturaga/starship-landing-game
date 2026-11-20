@@ -1,8 +1,11 @@
-import { describe, expect, it } from 'vitest';
+import { beforeAll, describe, expect, it } from 'vitest';
+import { initPhysics } from '../src/sim/world';
 import { MODES, type ModeId } from '../src/sim/modes';
 import { Simulation } from '../src/sim/simulation';
 import { tiltDeg } from '../src/sim/outcome';
 import { deltaVLeft } from '../src/sim/physics';
+
+beforeAll(() => initPhysics());
 
 /** Flies a whole descent by doing exactly what the flight computer's cues say. */
 function flyByCues(modeId: ModeId, setup?: (sim: Simulation) => void) {
@@ -48,6 +51,13 @@ describe('flight model', () => {
     sim.setThrottle(0);
     for (let i = 0; i < 120; i++) sim.step();
     expect(sim.ship.thrust).toBe(0);
+  });
+
+  it('detects hitting the tower through Rapier colliders', () => {
+    const sim = new Simulation(MODES.pilot);
+    sim.ship.pos.set(-5.5, 200, 0);
+    for (let i = 0; i < 120 * 10 && !sim.outcome; i++) sim.step();
+    expect(sim.outcome?.why).toBe('The Ship hit the tower.');
   });
 
   it('reports delta-v that shrinks with propellant', () => {
