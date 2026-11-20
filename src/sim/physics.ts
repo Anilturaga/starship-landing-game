@@ -43,6 +43,8 @@ export interface ShipState {
   engines: number; // lit engine count
   perEngine: number; // throttle per lit engine
   thrust: number; // N
+  /** Specific force (thrust and aerodynamics per unit mass, without gravity), world m/s². Where the propellant settles from. */
+  accel: Vector3;
   gimbal: { x: number; z: number }; // rad, for visuals
   ctrl: { x: number; z: number }; // fraction of available torque used
   flapAuthority: number; // N·m
@@ -75,6 +77,7 @@ export function createShip(propellant: number): ShipState {
     engines: 0,
     perEngine: 0,
     thrust: 0,
+    accel: new Vector3(),
     gimbal: { x: 0, z: 0 },
     ctrl: { x: 0, z: 0 },
     flapAuthority: 0,
@@ -168,5 +171,6 @@ export function physStep(s: ShipState, dt: number, env: Env, world: SiteWorld) {
   // --- hand the forces to Rapier (aerodynamic rate damping from crossflow goes in the torque)
   const kd = rho * 0.8 * 2 * RADIUS * vpm * (LENGTH ** 3 / 12);
   TQ.set(tx - kd * s.w.x, ty, tz - kd * s.w.z).applyQuaternion(s.q);
+  s.accel.copy(F).divideScalar(m);
   return world.step(s, F, TQ, m, INERTIA.set(Ip, Ir, Ip));
 }

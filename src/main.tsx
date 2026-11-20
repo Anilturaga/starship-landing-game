@@ -5,8 +5,8 @@ import './ui/styles.css';
 
 // Rapier is WebAssembly: load it before the store creates the first flight
 initPhysics().then(async () => {
-  const [{ default: App }, { useGame }] = await Promise.all([import('./App'), import('./state/store')]);
-  // ?debug exposes the game store for automated browser checks
-  if (new URLSearchParams(location.search).has('debug')) (window as unknown as { game: typeof useGame }).game = useGame;
+  const [{ default: App }, { useGame }, { view }] = await Promise.all([import('./App'), import('./state/store'), import('./state/view')]);
+  // ?debug exposes the game store and camera state for automated browser checks
+  if (new URLSearchParams(location.search).has('debug')) Object.assign(window, { game: useGame, view });
   createRoot(document.getElementById('root')!).render(<StrictMode><App /></StrictMode>);
 });

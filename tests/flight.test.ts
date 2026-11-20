@@ -45,6 +45,22 @@ describe('flight model', () => {
     expect(sim.outcome?.why).toBe('The Ship hit the tower.');
   });
 
+  it('the hull cannot pass through a chopstick', () => {
+    const sim = new Simulation(MODES.pilot);
+    sim.ship.pos.set(14, 110, -14); // upright beside the open -z arm, its hull overlapping the arm
+    sim.ship.q.identity();
+    sim.ship.vel.set(0, -3, 0);
+    for (let i = 0; i < 120 * 10 && !sim.outcome; i++) sim.step();
+    expect(sim.outcome?.why).toMatch(/hull struck a chopstick/);
+  });
+
+  it('the arms close around the Ship before it settles on them', () => {
+    const sim = fly('cadet', PERFECT);
+    expect(sim.outcome?.kind).toBe('caught');
+    expect(sim.world.arms.closed).toEqual([true, true]);
+    expect(sim.world.arms.face[1] - sim.world.arms.face[0]).toBeLessThan(2 * (4.5 + 1));
+  });
+
   it('reports delta-v that shrinks with propellant', () => {
     expect(deltaVLeft(34_000)).toBeGreaterThan(deltaVLeft(10_000));
     expect(deltaVLeft(0)).toBe(0);

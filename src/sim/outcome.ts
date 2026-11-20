@@ -49,6 +49,8 @@ export function judge(s: ShipState, hits: ReadonlySet<Hit>, limits: CatchLimits)
   });
 
   if (hits.has('tower')) return end('crash', 'The Ship hit the tower.');
+  if (hits.has('hull-arm')) return end('crash', 'The hull struck a chopstick. Line the Ship up between the arms before coming down.');
+  if (hits.has('arm-open')) return end('crash', 'The Ship came down on one arm before both arms had closed around it.');
   if (hits.has('arms')) {
     if (offset < limits.off && descent < limits.vs && sideways < limits.hs && tilt < limits.tilt) {
       return end('caught', 'The Ship settled onto the arms within limits.');
@@ -60,7 +62,7 @@ export function judge(s: ShipState, hits: ReadonlySet<Hit>, limits: CatchLimits)
     if (tilt >= limits.tilt) r.push(`tilted ${tilt.toFixed(0)}°`);
     return end('crash', `The Ship struck the arms: ${r.join(', ')}.`);
   }
-  if (hits.has('mount')) return end('crash', 'The Ship hit the launch mount.');
+  if (hits.has('mount')) return end('crash', 'The Ship dropped past the arms onto the launch mount.');
 
   const speed = s.vel.length();
   if (s.pos.x > shoreX(s.pos.z)) {

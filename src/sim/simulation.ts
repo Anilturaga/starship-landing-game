@@ -1,10 +1,10 @@
-import { ARM_Y, CATCH, STEP } from './constants';
+import { ARM_Y, CATCH, PIN_HALF, STEP } from './constants';
 import { createGuide, updateGuide, type Guide } from './guidance';
 import type { Mode } from './modes';
 import { judge, pinPos, type Outcome } from './outcome';
 import { createShip, physStep, type ShipState } from './physics';
 import { Vector3 } from 'three';
-import { SiteWorld } from './world';
+import { ARM_TOP, SiteWorld } from './world';
 
 const GUIDE_PERIOD = 0.1; // s of sim time between flight-computer updates
 export const SPEEDS = [1, 0.5, 0.25] as const;
@@ -17,7 +17,7 @@ export class Simulation {
   readonly mode: Mode;
   ship: ShipState;
   /** Rapier world: integrates the Ship and detects contacts. Needs initPhysics() first. */
-  private world = new SiteWorld();
+  readonly world = new SiteWorld();
   guide: Guide = createGuide();
   outcome: Outcome | null = null;
   running = false;
@@ -61,7 +61,7 @@ export class Simulation {
     if (out) {
       this.outcome = out;
       s.thr = 0;
-      if (out.kind === 'caught') s.pos.y += ARM_Y - pinPos(s, this.pin).y; // rest the pins on the arms
+      if (out.kind === 'caught') s.pos.y += ARM_TOP + PIN_HALF - pinPos(s, this.pin).y; // rest the pins on the arms
       s.vel.set(0, 0, 0);
       s.w.set(0, 0, 0);
       return;

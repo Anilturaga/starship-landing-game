@@ -1,6 +1,6 @@
 import { Vector3 } from 'three';
 import {
-  ARM_Y, CATCH, DRY_MASS, FLIP_ALT, G0, HALF, MAX_TILT, PIN_OFFSET, RAPTOR_THRUST, shoreX, SL_ENGINES, THROTTLE_OFF,
+  ARM_REACH, ARM_Y, ARMS, CATCH, DRY_MASS, FLIP_ALT, G0, HALF, MAX_TILT, PIN_OFFSET, RADIUS, RAPTOR_THRUST, shoreX, SL_ENGINES, THROTTLE_OFF,
 } from './constants';
 import { BELLY_PITCH, inGate } from './control';
 import { bodyAxes, deltaVLeft, type ShipState } from './physics';
@@ -21,6 +21,8 @@ const GATE = 0.85;
  */
 const ENTRY = 260;
 /** Sideways distance the upright descent can cover from the flip down (see the upright rule in assess). */
+/** Hull length below the pins. */
+const HULL_BELOW = HALF + PIN_OFFSET;
 const UPRIGHT_REACH = 7 * (Math.sqrt(FLIP_ALT - ARM_Y) + 15);
 const MAX_THRUST = SL_ENGINES * RAPTOR_THRUST;
 const clamp = (v: number, a: number, b: number) => Math.min(b, Math.max(a, v));
@@ -95,10 +97,15 @@ function assess(s: ShipState, v: View, g: Guide, belly: boolean) {
   g.abort = { why, mode: dOcean < reach ? 'ocean' : 'clear' };
 }
 
+/** Lined up between the open arms, where the hull can go below their top without touching them. */
+const inCorridor = (p: Vector3) => Math.abs(p.z - CATCH.z) < ARMS.open - RADIUS - 1.5;
+
 /** Where to go: the catch axis, or an abort site. */
 function targetOf(v: View, g: Guide) {
   const ab = g.abort;
   const t = new Vector3(CATCH.x, 0, CATCH.z);
+  // low and beside the arms: line up out past their tips first, then move in between them
+  if (!ab && v.hArm < HULL_BELOW + 12 && !inCorridor(v.pin)) t.set(ARM_REACH.x1 + RADIUS + 10, 0, CATCH.z);
   if (ab?.mode === 'ocean') t.set(Math.max(shoreX(v.pin.z) + 450, v.pin.x + 60), 0, v.pin.z);
   else if (ab) {
     const away = new Vector3(v.pin.x - CATCH.x, 0, v.pin.z - CATCH.z);
@@ -131,6 +138,8 @@ function descend(v: View, g: Guide, d: number, dir: Vector3) {
   let vt = h > 0 ? clamp(Math.min(Math.sqrt(4 * h), 1 + 0.25 * h), 1, 60) : 0;
   // close to the arms, creep down until lined up and steady, as a pilot would
   if (!ab && h < 60 && (d > 1.5 || v.vh.length() > 1.2)) vt = Math.min(vt, 0.3 + Math.max(0, h - 10) * 0.1);
+  // the hull hangs 40 m below the pins: keep it above the arms until it is in the corridor between them
+  if (!ab && !inCorridor(v.pin) && d < 90) vt = Math.min(vt, h > HULL_BELOW + 7 ? Math.sqrt(2.5 * (h - HULL_BELOW - 7)) : -1);
   if (toOcean) vt = clamp(Math.min(vt, h / Math.max(1, d / 22)), 2, 60); // slow down to buy time
   const ah = dir.clone().multiplyScalar(clamp(d * 0.18, 0, toOcean ? 28 : ab ? 14 : 7)).sub(v.vh).multiplyScalar(0.35);
   if (over) ah.copy(v.vh).multiplyScalar(-0.4);

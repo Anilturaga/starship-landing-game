@@ -3,7 +3,7 @@ import { useFrame } from '@react-three/fiber';
 import { useMemo } from 'react';
 import {
   BufferAttribute, ClampToEdgeWrapping, Color, MeshStandardMaterial, Path, PlaneGeometry, Shape, ShapeGeometry, SRGBColorSpace,
-  Vector2, type Texture,
+  Vector2, Vector3, type Texture,
 } from 'three';
 import farUrl from '../assets/terrain-far.jpg';
 import farRoughUrl from '../assets/terrain-far-rough.png';
@@ -27,8 +27,8 @@ const [CX, CZ] = meta.centre;
 const WAVE = 45; // m per ripple-texture repeat
 const DETAIL = 7; // m per detail-texture repeat
 const NORMAL = new Vector2(0.18, 0.18);
-/** NAIP's pale flats read slightly lilac under a deep blue sky; a touch of warmth corrects it. */
-const WARM = new Color(1.05, 1.0, 0.92);
+/** NAIP's pale flats read lilac under the dusk sky; a touch of warmth corrects it. */
+const WARM = new Color(1.0, 0.9, 0.78);
 
 /** Square ring in ground coordinates (x east, y north) with UVs spanning `uvSize` metres around the site. */
 function ring(outer: number, inner: number, uvSize: number) {
@@ -132,6 +132,69 @@ function Apron() {
   );
 }
 
+/**
+ * The Gulf: one water surface over all the imagery rings, so the sea has one colour and one sheen everywhere
+ * (each ring's photographed water differed, which showed as patches). It shows where the rings' sea masks say
+ * there is water, fades out over the surf near the beach so the imagery's breakers show through, and reflects
+ * the sky and the low sun.
+ */
+function Ocean({ masks, waves }: { masks: Texture[]; waves: Texture }) {
+  const SIZE = 160_000; // the camera sees 80 km
+  const ripples = useMemo(() => {
+    const r = waves.clone();
+    r.repeat.setScalar(SIZE / 60);
+    return r;
+  }, [waves]);
+  useFrame(({ clock }) => ripples.offset.set(clock.elapsedTime * 0.012, clock.elapsedTime * 0.007));
+  const mat = useMemo(() => {
+    const m = new MeshStandardMaterial({
+      color: new Color(0.012, 0.04, 0.05), roughness: 0.2, metalness: 0, normalMap: ripples, normalScale: new Vector2(0.1, 0.1),
+      transparent: true, envMapIntensity: 0.65,
+    });
+    m.onBeforeCompile = (sh) => {
+      Object.assign(sh.uniforms, {
+        uMid: { value: masks[0] }, uNear: { value: masks[1] }, uFar: { value: masks[2] },
+        uSite: { value: new Vector2(CX, CZ) }, uSizes: { value: new Vector3(meta.mid, meta.near, meta.far) },
+        uShore: { value: new Vector2(meta.shore.x, meta.shore.slope) },
+      });
+      sh.vertexShader = sh.vertexShader
+        .replace('#include <common>', '#include <common>\nvarying vec3 vWorld;')
+        .replace('#include <project_vertex>', '#include <project_vertex>\nvWorld = (modelMatrix * vec4(transformed, 1.0)).xyz;');
+      sh.fragmentShader = sh.fragmentShader
+        .replace('#include <common>', `#include <common>
+          varying vec3 vWorld; uniform sampler2D uMid, uNear, uFar; uniform vec2 uSite, uShore; uniform vec3 uSizes;
+          float seaIn(sampler2D t, vec2 d, float size) {
+            return clamp((1.0 - texture2D(t, vec2(d.x, -d.y) / size + 0.5).g) / 0.62, 0.0, 1.0);
+          }`)
+        // two layers of ripples at different scales and angles, so the pattern never visibly repeats
+        .replace('#include <normal_fragment_maps>', /* glsl */ `
+          vec2 ruv = vNormalMapUv;
+          vec3 n1 = texture2D(normalMap, ruv).xyz * 2.0 - 1.0;
+          vec3 n2 = texture2D(normalMap, mat2(0.8, -0.6, 0.6, 0.8) * ruv * 0.29 + vec2(0.37, 0.11)).xyz * 2.0 - 1.0;
+          vec3 n3 = texture2D(normalMap, mat2(-0.5, 0.87, -0.87, -0.5) * ruv * 2.3).xyz * 2.0 - 1.0;
+          vec2 slope = (n1.xy * 0.45 + n2.xy + n3.xy * 0.5) * normalScale;
+          normal = normalize(mat3(viewMatrix) * vec3(slope.x, 1.0, -slope.y)); // the plane lies flat: local z is world up`)
+        .replace('#include <alphamap_fragment>', /* glsl */ `
+          vec2 d = vWorld.xz - uSite;
+          float a = max(abs(d.x), abs(d.y));
+          float past = vWorld.x - (uShore.x + uShore.y * clamp(vWorld.z, -20000.0, 20000.0));
+          float sea = step(0.0, past);
+          // past the centre: east of the surveyed shoreline is always sea (the coarse masks have gaps), plus any water they mark
+          if (a < uSizes.z * 0.5) sea = max(sea, seaIn(uFar, d, uSizes.z));
+          if (a < uSizes.y * 0.5) sea = max(smoothstep(0.0, 18.0, past), seaIn(uNear, d, uSizes.y) * step(0.0, past));
+          if (a < uSizes.x * 0.5) sea = seaIn(uMid, d, uSizes.x) * smoothstep(0.0, 18.0, past);
+          if (sea < 0.02) discard;
+          diffuseColor.a = smoothstep(0.2, 0.95, sea);`);
+    };
+    return m;
+  }, [masks, ripples]);
+  return (
+    <mesh material={mat} position={[0, 0.3, 0]} rotation={[-Math.PI / 2, 0, 0]} renderOrder={1}>
+      <planeGeometry args={[SIZE, SIZE, 64, 64]} />
+    </mesh>
+  );
+}
+
 export function Terrain() {
   const tex = useTexture([padUrl, midUrl, nearUrl, farUrl, midRoughUrl, nearRoughUrl, farRoughUrl, heightUrl]);
   const [pad, mid, near, far, midRough, nearRough, farRough, height] = tex;
@@ -151,6 +214,7 @@ export function Terrain() {
       <Ring outer={meta.near} inner={meta.mid} uvSize={meta.near} map={near} rough={nearRough} waves={waves} />
       <Ring outer={meta.far} inner={meta.near} uvSize={meta.far} map={far} rough={farRough} waves={waves} />
       <Apron />
+      <Ocean masks={[midRough, nearRough, farRough]} waves={waves} />
     </group>
   );
 }

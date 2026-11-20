@@ -1,7 +1,7 @@
 import { ArrowCounterClockwise, SlidersHorizontal } from '@phosphor-icons/react';
 import { useGame } from '../state/store';
 
-const TITLES = { caught: 'Caught', ground: 'Landed off target', ocean: 'Aborted to ocean', crash: 'Vehicle lost' } as const;
+const TITLES = { caught: 'Landed', ground: 'Landed off target', ocean: 'Aborted to ocean', crash: 'Vehicle lost' } as const;
 
 export function EndCard() {
   const o = useGame((s) => s.outcome);

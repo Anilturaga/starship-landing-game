@@ -1,6 +1,8 @@
+import { useFrame } from '@react-three/fiber';
 import { useLayoutEffect, useMemo, useRef } from 'react';
-import { BoxGeometry, InstancedMesh, LatheGeometry, MeshStandardMaterial, Object3D, Vector2, Vector3, type Material } from 'three';
-import { ARM_REACH, ARM_Y, CATCH, MOUNT, TOWER } from '../sim/constants';
+import { BoxGeometry, Group, InstancedMesh, LatheGeometry, MeshStandardMaterial, Object3D, Vector2, Vector3, type Material } from 'three';
+import { ARM_REACH, ARM_Y, ARMS, CATCH, MOUNT, TOWER } from '../sim/constants';
+import { useGame } from '../state/store';
 
 /**
  * Starbase Pad A launch and catch tower, modelled from photos (Wikimedia Commons):
@@ -69,11 +71,11 @@ function towerBeams(): Beam[] {
   return out;
 }
 
-/** One chopstick: a deep box truss, flat on top, its bottom chord rising toward the tip. */
+/** One chopstick in its own frame (inner face at z = 0): a deep box truss, flat on top, its bottom chord rising toward the tip. */
 function armBeams(side: number): Beam[] {
-  const { x0, x1, halfGap } = ARM_REACH;
+  const { x0, x1 } = ARM_REACH;
   const out: Beam[] = [];
-  const zc = side * (halfGap + 0.9);
+  const zc = side * (ARMS.depth / 2);
   const top = ARM_Y - 0.5;
   const bottomAt = (x: number) => ARM_Y - 6.5 + ((x - x0) / (x1 - x0)) * 4.5;
   for (const dz of [-0.7, 0.7]) {
@@ -99,6 +101,8 @@ function carriageBeams(): Beam[] {
     for (let f = 0; f < 4; f++) out.push([cx + c[f][0], y, c[f][1], cx + c[(f + 1) % 4][0], y, c[(f + 1) % 4][1], 0.8]);
   }
   for (const s of [-1, 1]) out.push([cx + h, y0, s * h, cx + h, y1, s * (h - 4), 0.6]);
+  // tracks the arms slide along as they open and close
+  for (const s of [-1, 1]) for (const y of [ARM_Y - 1.2, ARM_Y - 5]) out.push([cx + h + 0.6, y, s * 3, cx + h + 0.6, y, s * (ARMS.open + ARMS.depth + 0.5), 0.7]);
   return out;
 }
 
@@ -112,6 +116,21 @@ function qdBeams(): Beam[] {
   return out;
 }
 
+/** One chopstick, sliding with the simulation's arms. */
+function Arm({ side }: { side: number }) {
+  const ref = useRef<Group>(null);
+  const beams = useMemo(() => armBeams(side), [side]);
+  useFrame(() => { ref.current!.position.z = useGame.getState().sim.world.arms.face[side > 0 ? 1 : 0]; });
+  return (
+    <group ref={ref}>
+      <Beams beams={beams} material={black} />
+      <mesh material={rail} position={[CATCH.x, ARM_Y + 0.1, side * ARMS.depth / 2]} castShadow>
+        <boxGeometry args={[7, 0.4, 2]} />
+      </mesh>
+    </group>
+  );
+}
+
 /** Orbital launch mount: a ring table on six legs (profile lathed). */
 function mountRing() {
   const r0 = 6.5, r1 = MOUNT.radius - 1, y0 = MOUNT.top - 5, y1 = MOUNT.top;
@@ -120,7 +139,7 @@ function mountRing() {
 
 export function CatchTower() {
   const t = useMemo(towerBeams, []);
-  const arms = useMemo(() => [...armBeams(-1), ...armBeams(1), ...carriageBeams(), ...qdBeams()], []);
+  const arms = useMemo(() => [...carriageBeams(), ...qdBeams()], []);
   const ring = useMemo(mountRing, []);
   const { x: cx, width: w, height: H } = TOWER;
   return (
@@ -139,11 +158,8 @@ export function CatchTower() {
       <mesh material={core} position={[cx - 2, H + 3, -2]} castShadow>
         <boxGeometry args={[5, 4, 5]} />
       </mesh>
-      {[-1, 1].map((s) => (
-        <mesh key={s} material={rail} position={[CATCH.x, ARM_Y + 0.1, s * (ARM_REACH.halfGap + 0.9)]} castShadow>
-          <boxGeometry args={[7, 0.4, 2]} />
-        </mesh>
-      ))}
+      <Arm side={-1} />
+      <Arm side={1} />
       <group position={[CATCH.x, 0, CATCH.z]}>
         {Array.from({ length: 6 }, (_, i) => {
           const a = (i / 6) * Math.PI * 2 + Math.PI / 6;

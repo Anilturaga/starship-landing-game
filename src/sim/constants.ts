@@ -39,7 +39,13 @@ export const SCALE_HEIGHT = 8500;
 export const ARM_Y = 72; // top surface of the chopsticks
 export const CATCH = { x: 14, z: 0 }; // catch axis between the arms
 export const TOWER = { x: -7, width: 12, height: 146 };
-export const ARM_REACH = { x0: -1, x1: 25, halfGap: 5.9 };
+export const ARM_REACH = { x0: -1, x1: 25 };
+/** Chopstick inner faces: open while waiting (|z| of the face), and the clearance kept from the hull when closed. */
+export const ARMS = { open: 11, clear: RADIUS + 0.5, speed: 3, depth: 2.3 };
+/** How far the catch pins stand out from the body axis. */
+export const PIN_REACH = RADIUS + 2.1;
+/** Pin half height: the pins' centre rests this far above the arms' top. */
+export const PIN_HALF = 0.45;
 export const MOUNT = { radius: 11, top: 27 };
 /** The real Boca Chica shoreline (from USGS lidar, see scripts/terrain.py): x = SHORE_X + SHORE_SLOPE · z. */
 export const SHORE_X = 394;

@@ -5,7 +5,7 @@ import {
   LatheGeometry, Mesh, MeshStandardMaterial, PointLight, ShaderMaterial, Shape, Sprite, SpriteMaterial, Vector2,
   type BufferGeometry, type Material,
 } from 'three';
-import { HALF, PIN_OFFSET, RADIUS as R } from '../sim/constants';
+import { HALF, PIN_HALF, PIN_OFFSET, PIN_REACH, RADIUS as R } from '../sim/constants';
 import { airDensity, FLAPS } from '../sim/physics';
 import { useGame } from '../state/store';
 import { glowTexture, steelRoughness, tileTexture } from './textures';
@@ -105,8 +105,8 @@ function buildShip(): ShipParts {
   rim.position.y = -HALF;
   root.add(liner, dome, rim);
   for (const s of [-1, 1]) {
-    const p = mesh(new BoxGeometry(1.4, 0.9, 1.3), pinMat);
-    p.position.set(s * (R + 0.4), PIN_OFFSET, 0);
+    const p = mesh(new BoxGeometry(PIN_REACH - R + 0.6, 2 * PIN_HALF, 1.3), pinMat);
+    p.position.set(s * ((PIN_REACH + R) / 2 - 0.3), PIN_OFFSET, 0);
     root.add(p);
   }
 
