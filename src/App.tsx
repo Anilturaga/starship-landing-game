@@ -38,7 +38,7 @@ function useKeyboard() {
 function useCameraGestures() {
   const lastTap = useRef(0);
   const zoom = (f: number) => {
-    if (useGame.getState().camera === 0) view.orbit.dist = clamp(view.orbit.dist * f, 25, 600);
+    if (useGame.getState().camera <= 1) view.orbit.dist = clamp(view.orbit.dist * f, 25, 600);
     else view.zoom = clamp(view.zoom * f, 0.3, 1.5);
   };
   return useGesture(

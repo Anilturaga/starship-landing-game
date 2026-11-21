@@ -23,58 +23,57 @@ const c60 = Math.cos(Math.PI / 3), s60 = Math.sin(Math.PI / 3);
 const AFT_FLAP = onboard([4.95, -5, -2.3], [6.6, -24, -1.2], [0, 0, -1], 70);
 const ENGINE_BAY = onboard([c60 * 3.7, -21.6, s60 * 3.7], [-1.2, -34, -2], [c60, 0, s60], 105);
 const TRACKING_POS = new Vector3(1650, 9, 1250);
-const TOWER_POS = new Vector3(25, ARM_Y + 2, -9);
+/** Ground camera for the catch: on a mast east-south-east of the arms, looking at them past their open side. */
+const PAD_POS = new Vector3(300, 45, 170);
 
 /**
- * Drives the single scene camera from the selected viewpoint:
- * 0 chase (drag to orbit), 1 ground tracking, 2 aft flap, 3 engine bay, 4 tower.
+ * Drives the single scene camera from the selected preset (modelled on the usual sets in flight and space games
+ * and on SpaceX webcasts):
+ *
+ * 0 Chase: an orbit camera around the Ship that keeps the horizon level and stays where you leave it, like
+ *   Kerbal Space Program's Free view. It starts behind the Ship with the landing site ahead; drag to orbit.
+ * 1 Target: behind the Ship on the line from the catch, a little above, so the Ship and the landing site are
+ *   both in frame; near the tower it settles on the open side of the arms. Drag to offset it.
+ * 2 Onboard: the aft-flap camera, 3 Engines: the engine-bay camera (webcast views; drag to look around).
+ * 4 Ground: the long-lens tracking camera, cutting to a camera on the sand beside the pad for the catch.
  */
 export function CameraRig() {
   const camera = useThree((s) => s.camera) as PerspectiveCamera;
-  const tmp = useMemo(() => ({ q: new Quaternion(), v: new Vector3(), a: new Vector3(), b: new Vector3(), lastSim: null as unknown }), []);
+  const tmp = useMemo(() => ({ q: new Quaternion(), v: new Vector3(), a: new Vector3(), b: new Vector3(), lastSim: null as unknown, padCut: false, tYaw: 0, tPitch: 0.3 }), []);
 
   useFrame((_, dt) => {
     const { sim, camera: idx } = useGame.getState();
     const s = sim.ship;
-    if (tmp.lastSim !== sim) { tmp.lastSim = sim; view.reset(); }
+    if (tmp.lastSim !== sim) { tmp.lastSim = sim; view.reset(); tmp.padCut = false; }
     let fov = 50;
+    const hx = s.pos.x - CATCH.x, hz = s.pos.z - CATCH.z, hd = Math.hypot(hx, hz);
+    const awayYaw = hd > 1 ? Math.atan2(hx, hz) : CATCH_YAW;
+    const orbitAt = (yaw: number, pitch: number, dist: number) => {
+      const cp = Math.cos(pitch);
+      camera.position.set(s.pos.x + Math.sin(yaw) * cp * dist, Math.max(3, s.pos.y + Math.sin(pitch) * dist), s.pos.z + Math.cos(yaw) * cp * dist);
+    };
 
     if (idx === 0) {
       const o = view.orbit;
-      // auto: open on the Ship alone, then pull back and rise until the landing site shows below it; near the
-      // tower, swing to the open side of the arms so the tower never comes between the camera and the Ship
-      const intro = smooth(1, 4.5, s.t);
-      const hx = s.pos.x - CATCH.x, hz = s.pos.z - CATCH.z, hd = Math.hypot(hx, hz);
+      // placed once (at the start and on recenter): behind the Ship, the landing site ahead of the camera
+      if (o.reseat) { o.yaw = awayYaw + 0.35; o.pitch = 0.22; o.reseat = false; }
+      orbitAt(o.yaw, o.pitch, o.dist);
+      camera.lookAt(s.pos);
+    } else if (idx === 1) {
       const near = smooth(700, 220, s.pos.distanceTo(TOWER_TOP));
-      if (o.auto) {
-        const away = hd > 1 ? Math.atan2(hx, hz) : CATCH_YAW;
-        const elev = Math.atan2(s.pos.y - ARM_Y, Math.max(hd, 1));
-        const far = { yaw: away + 0.25, pitch: clamp(elev + 0.3, 0.05, 0.9) };
-        const want = {
-          yaw: far.yaw + wrap(CATCH_YAW - far.yaw) * near,
-          pitch: 0.08 + ((far.pitch + (0.12 - far.pitch) * near) - 0.08) * intro,
-        };
-        const k = s.t < 0.05 ? 1 : 1 - Math.exp(-dt * 1.2);
-        const kYaw = s.t < 0.05 ? 1 : k * (0.3 + 0.7 * intro);
-        o.yaw += wrap(want.yaw - o.yaw) * kYaw;
-        o.pitch += (want.pitch - o.pitch) * k;
-      }
-      // the opening shot fits the whole 50 m hull across the screen, however narrow (portrait phones)
-      const halfW = Math.atan(Math.tan((camera.fov * Math.PI) / 360) * camera.aspect);
-      const dist = o.auto ? Math.max(o.dist, (36 / Math.tan(halfW)) * (1 - intro)) : o.dist;
-      const cp = Math.cos(o.pitch);
-      camera.position.set(
-        s.pos.x + Math.sin(o.yaw) * cp * dist,
-        Math.max(3, s.pos.y + Math.sin(o.pitch) * dist),
-        s.pos.z + Math.cos(o.yaw) * cp * dist,
-      );
-      if (o.auto) {
-        // look between the Ship and the landing site, so both are in frame
-        const m = intro * (0.4 * (1 - near) + 0.2 * near);
-        const dS = tmp.a.subVectors(s.pos, camera.position).normalize();
-        const dT = tmp.b.subVectors(TOWER_TOP, camera.position).normalize();
-        camera.lookAt(tmp.v.copy(dS).lerp(dT, m).add(camera.position));
-      } else camera.lookAt(s.pos);
+      const elev = Math.atan2(s.pos.y - ARM_Y, Math.max(hd, 1));
+      const farYaw = awayYaw + 0.25, farPitch = clamp(elev + 0.28, 0.05, 0.9);
+      const wantYaw = farYaw + wrap(CATCH_YAW - farYaw) * near + view.look.yaw;
+      const wantPitch = clamp(farPitch + (0.12 - farPitch) * near - view.look.pitch, -0.3, 1.3);
+      const k = s.t < 0.05 ? 1 : 1 - Math.exp(-dt * 1.5);
+      tmp.tYaw += wrap(wantYaw - tmp.tYaw) * k;
+      tmp.tPitch += (wantPitch - tmp.tPitch) * k;
+      orbitAt(tmp.tYaw, tmp.tPitch, view.orbit.dist);
+      // look between the Ship and the landing site, so both are in frame
+      const m = 0.4 * (1 - near) + 0.2 * near;
+      const dS = tmp.a.subVectors(s.pos, camera.position).normalize();
+      const dT = tmp.b.subVectors(TOWER_TOP, camera.position).normalize();
+      camera.lookAt(tmp.v.copy(dS).lerp(dT, m).add(camera.position));
     } else if (idx === 2 || idx === 3) {
       const cam = idx === 2 ? AFT_FLAP : ENGINE_BAY;
       camera.position.copy(cam.p).applyQuaternion(s.q).add(s.pos);
@@ -83,11 +82,16 @@ export function CameraRig() {
         .multiply(tmp.q.setFromAxisAngle(X, view.look.pitch));
       fov = cam.fov;
     } else {
-      camera.position.copy(idx === 1 ? TRACKING_POS : TOWER_POS);
+      // cut to the pad camera once the Ship is close, back to tracking if it goes away again
+      const d = s.pos.distanceTo(TOWER_TOP);
+      if (d < 450) tmp.padCut = true; else if (d > 650) tmp.padCut = false;
+      camera.position.copy(tmp.padCut ? PAD_POS : TRACKING_POS);
       camera.lookAt(s.pos);
       camera.rotateY(view.look.yaw);
       camera.rotateX(view.look.pitch);
-      fov = idx === 1 ? clamp((2 * Math.atan(70 / camera.position.distanceTo(s.pos)) * 180) / Math.PI, 1.2, 40) : 58;
+      // a long lens that keeps the Ship about the same size in frame
+      const span = tmp.padCut ? 110 : 70;
+      fov = clamp((2 * Math.atan(span / camera.position.distanceTo(s.pos)) * 180) / Math.PI, 1.2, 60);
     }
     fov = clamp(fov * view.zoom, 0.8, 110);
     if (Math.abs(camera.fov - fov) > 1e-3) { camera.fov = fov; camera.updateProjectionMatrix(); }

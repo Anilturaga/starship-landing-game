@@ -1,9 +1,11 @@
-import { CapsuleGeometry, MeshStandardMaterial } from 'three';
+import { useMemo } from 'react';
+import { CapsuleGeometry, ClampToEdgeWrapping, MeshStandardMaterial } from 'three';
+import { CATCH } from '../sim/constants';
+import { concreteTexture } from './textures';
 import { Terrain } from './Terrain';
 import { CatchTower } from './Tower';
 
-const concrete = new MeshStandardMaterial({ color: 0xb9b6ad, roughness: 0.95 });
-const tankMat = new MeshStandardMaterial({ color: 0xe4e6e8, metalness: 0.6, roughness: 0.35 });
+const tankMat = new MeshStandardMaterial({ color: 0xdfe1e2, metalness: 0.25, roughness: 0.55 });
 
 /** The Pad A tank farm, placed from the NAIP imagery: long horizontal tanks and two rows of big capsule tanks. */
 function TankFarm() {
@@ -23,11 +25,21 @@ function TankFarm() {
   );
 }
 
-/** Concrete pad around the tower and mount: a slab, not a plane, so it never sits coplanar with the ground. */
-function Apron() {
+/**
+ * Concrete footing under the tower and the mount only; the pad around it is the 0.3 m survey imagery (the rest of
+ * the real site is sand there). A thin slab, so it never sits coplanar with the ground.
+ */
+const FOOT = { x0: -17, x1: 29, z0: -15, z1: 15 };
+function Footing() {
+  const mat = useMemo(() => {
+    const w = FOOT.x1 - FOOT.x0, h = FOOT.z1 - FOOT.z0;
+    const map = concreteTexture(w, h, CATCH.x - FOOT.x0, CATCH.z - FOOT.z0);
+    map.wrapS = map.wrapT = ClampToEdgeWrapping;
+    return new MeshStandardMaterial({ map, roughness: 0.92, metalness: 0 });
+  }, []);
   return (
-    <mesh position={[60, 0.25, -6]} material={concrete} receiveShadow>
-      <boxGeometry args={[210, 0.5, 100]} />
+    <mesh position={[(FOOT.x0 + FOOT.x1) / 2, 0.2, (FOOT.z0 + FOOT.z1) / 2]} rotation={[-Math.PI / 2, 0, 0]} material={mat} receiveShadow>
+      <planeGeometry args={[FOOT.x1 - FOOT.x0, FOOT.z1 - FOOT.z0]} />
     </mesh>
   );
 }
@@ -36,7 +48,7 @@ export function World() {
   return (
     <>
       <Terrain />
-      <Apron />
+      <Footing />
       <CatchTower />
       <TankFarm />
     </>

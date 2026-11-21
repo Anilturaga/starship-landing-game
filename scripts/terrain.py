@@ -16,7 +16,7 @@ from PIL import Image, ImageFilter
 
 TOWER = (25.996127, -97.154742)  # Pad A tower base, from the NAIP imagery (tower shadow and relief displacement)
 TOWER_GAME_X = -7
-PAD, MID, NEAR = 600, 2000, 6000  # patch sizes, m (square, centred on the tower)
+PAD, MID, NEAR = 1200, 2000, 6000  # patch sizes, m (square, centred on the tower)
 OUT = os.path.join(os.path.dirname(__file__), "..", "src", "assets")
 CACHE = os.environ.get("TILE_CACHE", "/tmp/usgs-tiles")
 UA = {"User-Agent": "starship-landing-game terrain script"}
@@ -44,6 +44,18 @@ def naip(size, px):
     u = ("https://imagery.nationalmap.gov/arcgis/rest/services/USGSNAIPPlus/ImageServer/exportImage"
          f"?bbox={bbox(size)}&bboxSR=3857&imageSR=3857&size={px},{px}&format=jpg&f=image")
     return Image.open(get(u, f"naip_{TOWER[0]}_{TOWER[1]}_{size}_{px}.jpg")).convert("RGB")
+
+
+def naip_big(size, px):
+    """A patch larger than the server's export limit: four quadrants, stitched."""
+    h, q = size / 2 * K, px // 2
+    out = Image.new("RGB", (px, px))
+    for j, y0 in enumerate((TY, TY - h)):  # north row first: image rows run north to south
+        for i, x0 in enumerate((TX - h, TX)):
+            u = ("https://imagery.nationalmap.gov/arcgis/rest/services/USGSNAIPPlus/ImageServer/exportImage"
+                 f"?bbox={x0},{y0},{x0 + h},{y0 + h}&bboxSR=3857&imageSR=3857&size={q},{q}&format=jpg&f=image")
+            out.paste(Image.open(get(u, f"naip_{TOWER[0]}_{TOWER[1]}_{size}_{px}_{i}{j}.jpg")).convert("RGB"), (i * q, j * q))
+    return out
 
 
 def dem(size, px):
@@ -92,13 +104,24 @@ def fill(im, hole):
 
 
 def paint_out_tower(im, size):
-    """The orthophoto shows the 146 m tower 'lying' west-east with its shadow (relief displacement): remove it."""
+    """
+    The orthophoto shows the 146 m tower 'lying' west-east with its shadow (relief displacement): replace it with
+    the open ground just south of it.
+    """
     w = im.size[0]
     yy, xx = np.mgrid[0:w, 0:w]
     x = (xx - w / 2) * size / w + TOWER_GAME_X
     z = (yy - w / 2) * size / w
     hole = (x > -12) & (x < 155) & (z > -42) & (z < 26)
-    return fill(im, hole)
+    # one coherent copy of the ground 75 m further south, which keeps its grain and tracks sharp
+    a = np.asarray(im, dtype=np.float32)
+    shift = int(round(75 / (size / w)))
+    q = a.copy()
+    q[:-shift] = a[shift:]
+    feather = max(2, int(4 / (size / w)))
+    grown = np.asarray(Image.fromarray(np.uint8(hole * 255)).filter(ImageFilter.GaussianBlur(feather))) > 4
+    soft = np.asarray(Image.fromarray(np.uint8(grown * 255)).filter(ImageFilter.GaussianBlur(feather)), np.float32)[..., None] / 255
+    return Image.fromarray(np.uint8(np.clip(a * (1 - soft) + q * soft, 0, 255)))
 
 
 GULF = np.array([38, 92, 104], dtype=np.float32)  # open-water colour offshore
@@ -305,8 +328,8 @@ def crop_centre(im, size, inner):
 
 
 # --- imagery
-pad = paint_out_tower(naip(PAD, 2048), PAD)
-mid = paint_out_tower(naip(MID, 2048), MID)
+pad = paint_out_tower(naip_big(PAD, 4096), PAD)  # ~0.3 m per pixel, the survey's full resolution
+mid = paint_out_tower(naip_big(MID, 4096), MID)  # ~0.5 m
 near = naip(NEAR, 2048)
 near = paint_out_tower(near, NEAR)
 
@@ -371,7 +394,7 @@ for name, im, size in (("mid", mid, MID), ("near", near, NEAR), ("far", far, FAR
 
 # --- heights for the mid patch: dunes and ridges above the pad level, sea and flats at 0,
 # flattened around the pad, fading to 0 at the patch edge so it meets the flat patches around it
-N = 257
+N = 513
 h = dem(MID, N)
 c = N // 2
 pad_level = float(np.median(h[c - 8:c + 8, c - 8:c + 8]))

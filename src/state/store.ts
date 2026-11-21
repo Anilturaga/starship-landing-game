@@ -3,7 +3,7 @@ import { MODES, type ModeId } from '../sim/modes';
 import type { Outcome } from '../sim/outcome';
 import { Simulation } from '../sim/simulation';
 
-export const CAMERAS = ['Chase', 'Tracking', 'Aft flap', 'Engine bay', 'Tower'] as const;
+export const CAMERAS = ['Chase', 'Target', 'Onboard', 'Engines', 'Ground'] as const;
 export type Screen = 'menu' | 'flying' | 'ended';
 
 const savedMode = (): ModeId => {

@@ -33,12 +33,10 @@ COAST.needsUpdate = true;
  * - centre 2 km: lidar heights (dunes), 1 m imagery with 0.3 m imagery over the pad, plus fine detail
  *   near the camera so it still reads as ground from a few metres up;
  * - rings out to 6 km, 35 km and a fog-hidden apron, flat. Rings never overlap, so nothing z-fights.
- * The Gulf is glossy (roughness from a sea mask) and ripples.
+ * The Gulf is one water surface over all of it (see Ocean).
  */
 const [CX, CZ] = meta.centre;
-const WAVE = 45; // m per ripple-texture repeat
 const DETAIL = 7; // m per detail-texture repeat
-const NORMAL = new Vector2(0.18, 0.18);
 /** NAIP's pale flats read lilac under the dusk sky; a touch of warmth corrects it. */
 const WARM = new Color(1.0, 0.9, 0.78);
 
@@ -77,19 +75,9 @@ function heightGrid(img: HTMLImageElement) {
   return g;
 }
 
-function useRipples(waves: Texture, uvSize: number) {
-  const t = useMemo(() => {
-    const r = waves.clone();
-    r.repeat.setScalar(uvSize / WAVE);
-    return r;
-  }, [waves, uvSize]);
-  useFrame(({ clock }) => t.offset.set(clock.elapsedTime * 0.0006 * (uvSize / WAVE), clock.elapsedTime * 0.0003 * (uvSize / WAVE)));
-  return t;
-}
-
 /** Imagery material for the centre: the pad imagery over the mid imagery, and detail that fades with distance. */
-function centreMaterial(mid: Texture, pad: Texture, rough: Texture, ripples: Texture, detail: Texture) {
-  const m = new MeshStandardMaterial({ color: WARM, map: mid, roughnessMap: rough, roughness: 1, metalness: 0, normalMap: ripples, normalScale: NORMAL, envMapIntensity: 0.35 });
+function centreMaterial(mid: Texture, pad: Texture, rough: Texture, detail: Texture) {
+  const m = new MeshStandardMaterial({ color: WARM, map: mid, roughnessMap: rough, roughness: 1, metalness: 0, envMapIntensity: 0.35 });
   m.onBeforeCompile = (sh) => {
     sh.uniforms.uPad = { value: pad };
     sh.uniforms.uDetail = { value: detail };
@@ -102,20 +90,19 @@ function centreMaterial(mid: Texture, pad: Texture, rough: Texture, ripples: Tex
         vec2 puv = (vMapUv - 0.5) * uPadScale + 0.5;
         vec2 e = smoothstep(0.0, 0.08, puv) * smoothstep(0.0, 0.08, 1.0 - puv);
         sampledDiffuseColor = mix(sampledDiffuseColor, texture2D(uPad, clamp(puv, 0.0, 1.0)), e.x * e.y);
-        float near = 1.0 - smoothstep(120.0, 900.0, length(vViewPosition));
+        float near = 1.0 - smoothstep(40.0, 400.0, length(vViewPosition));
         float d = texture2D(uDetail, vMapUv * uDetailRepeat).r * 0.65 + texture2D(uDetail, vMapUv * uDetailRepeat * 0.13).r * 0.35;
-        sampledDiffuseColor.rgb *= mix(1.0, 0.72 + 0.56 * d, near * 0.7);
+        sampledDiffuseColor.rgb *= mix(1.0, 0.8 + 0.4 * d, near * 0.5); // grain finer than the imagery, near the camera
         diffuseColor *= sampledDiffuseColor;`);
   };
   return m;
 }
 
-function Ring({ outer, inner, uvSize, map, rough, waves }: { outer: number; inner: number; uvSize: number; map: Texture; rough: Texture; waves: Texture }) {
+function Ring({ outer, inner, uvSize, map, rough }: { outer: number; inner: number; uvSize: number; map: Texture; rough: Texture }) {
   const geo = useMemo(() => ring(outer, inner, uvSize), [outer, inner, uvSize]);
-  const ripples = useRipples(waves, uvSize);
   return (
     <mesh geometry={geo} rotation={[-Math.PI / 2, 0, 0]}>
-      <meshStandardMaterial color={WARM} map={map} roughnessMap={rough} roughness={1} metalness={0} normalMap={ripples} normalScale={NORMAL} envMapIntensity={0.35} />
+      <meshStandardMaterial color={WARM} map={map} roughnessMap={rough} roughness={1} metalness={0} envMapIntensity={0.35} />
     </mesh>
   );
 }
@@ -224,15 +211,14 @@ export function Terrain() {
   }, [tex]); // eslint-disable-line react-hooks/exhaustive-deps
   const waves = useMemo(waterNormals, []);
   const detail = useMemo(detailNoise, []);
-  const centreRipples = useRipples(waves, meta.mid);
   const grid = useMemo(() => heightGrid(height.image as HTMLImageElement), [height]);
-  const material = useMemo(() => centreMaterial(mid, pad, midRough, centreRipples, detail), [mid, pad, midRough, centreRipples, detail]);
+  const material = useMemo(() => centreMaterial(mid, pad, midRough, detail), [mid, pad, midRough, detail]);
   return (
     <group>
       {/* the centre receives shadows: the Ship's and the tower's fall on it near the pad */}
       <mesh geometry={grid} material={material} position={[CX, 0, CZ]} rotation={[-Math.PI / 2, 0, 0]} />
-      <Ring outer={meta.near} inner={meta.mid} uvSize={meta.near} map={near} rough={nearRough} waves={waves} />
-      <Ring outer={meta.far} inner={meta.near} uvSize={meta.far} map={far} rough={farRough} waves={waves} />
+      <Ring outer={meta.near} inner={meta.mid} uvSize={meta.near} map={near} rough={nearRough} />
+      <Ring outer={meta.far} inner={meta.near} uvSize={meta.far} map={far} rough={farRough} />
       <Apron />
       <Ocean mask={midRough} waves={waves} />
     </group>
