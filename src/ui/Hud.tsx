@@ -191,7 +191,7 @@ function Radar({ t }: { t: T }) {
   const above = t.armsAbove;
   return (
     <div className={`radar${t.abort ? ' abort' : ''}`}>
-      {t.abort && <div className="abortb" role="status" title={t.abort.why}>ABORT · {t.abort.mode === 'ocean' ? 'OCEAN' : 'CLEAR'}</div>}
+      {t.abort && <div className="abortb" role="status" title={t.abort.why}>ABORT</div>}
       <svg viewBox="-50 -50 100 100" role="img" aria-label={`${t.offset.toFixed(0)} metres from the catch point`}>
         <defs><clipPath id="rclip"><circle r="46" /></clipPath></defs>
         <circle r="46" className="ring" />
