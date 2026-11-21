@@ -32,7 +32,7 @@ function readControls() {
     thr: s.thr,
     auto: sim.mode.autoThrottle,
     moved: useGame.getState().camera === 0
-      ? !view.orbit.auto || Math.abs(view.orbit.dist - 105) > 1 || Math.abs(view.orbit.pitch - 0.08) > 0.01 || view.zoom !== 1
+      ? !view.orbit.auto || Math.abs(view.orbit.dist - 105) > 1 || view.zoom !== 1
       : view.look.yaw !== 0 || view.look.pitch !== 0 || view.zoom !== 1,
     muted: audio.muted,
     speed: sim.autoSlow ? '½× auto' : sim.timeScale > 0.75 ? '1×' : sim.timeScale > 0.375 ? '½×' : '¼×',

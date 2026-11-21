@@ -105,7 +105,7 @@ class Sound {
   private tower!: Emitter;
   private buf!: { white: AudioBuffer; brown: AudioBuffer; crackle: AudioBuffer };
   private n!: {
-    rumble: GainNode; roar: GainNode; crackle: GainNode; roarF: BiquadFilterNode;
+    rumble: GainNode; growl: GainNode; roar: GainNode; crackle: GainNode; roarF: BiquadFilterNode;
     aero: GainNode; aeroF: BiquadFilterNode; wind: GainNode; windF: BiquadFilterNode;
     surf: GainNode; breeze: GainNode; drive: GainNode;
   };
@@ -136,21 +136,35 @@ class Sound {
     const ctx = (this.ctx = new Ctx());
     this.buf = { white: noise(ctx, 3, 'white'), brown: noise(ctx, 4, 'brown'), crackle: noise(ctx, 2.3, 'crackle') };
     const comp = ctx.createDynamicsCompressor();
-    comp.threshold.value = -14;
-    comp.ratio.value = 6;
+    comp.threshold.value = -18;
+    comp.knee.value = 6;
+    comp.ratio.value = 12;
     comp.attack.value = 0.005;
     comp.release.value = 0.25;
     this.master = gain(ctx, this.muted ? 0 : 0.9);
-    this.master.connect(comp).connect(ctx.destination);
+    // make-up gain after the limiter, then a soft clipper so even the loudest moments never clip harshly
+    const soft = ctx.createWaveShaper(), sc = new Float32Array(2048);
+    for (let i = 0; i < sc.length; i++) sc[i] = Math.tanh(((i / (sc.length - 1)) * 2 - 1) * 1.5) / Math.tanh(1.5);
+    soft.curve = sc;
+    this.master.connect(comp).connect(gain(ctx, 1.5)).connect(soft).connect(ctx.destination);
     this.ship = new Emitter(ctx, this.master);
     this.tower = new Emitter(ctx, this.master);
 
-    // Raptors: rumble (brown noise, low), roar (band of white noise), crackle
-    const rumble = gain(ctx), roar = gain(ctx), crackle = gain(ctx);
-    loop(ctx, this.buf.brown).connect(filter(ctx, 'lowpass', 140)).connect(rumble).connect(this.ship.input);
-    const roarF = filter(ctx, 'bandpass', 520, 0.5);
+    // Raptors. Phone speakers play little below ~250 Hz, so the low rumble (for headphones) is driven through a
+    // soft clipper: its overtones carry the same growl into the range small speakers do play. Then the roar
+    // (a broad band of noise) and the crackle of the shocked exhaust.
+    const rumble = gain(ctx), growl = gain(ctx), roar = gain(ctx), crackle = gain(ctx);
+    const low = loop(ctx, this.buf.brown);
+    low.connect(filter(ctx, 'lowpass', 160)).connect(rumble).connect(this.ship.input);
+    const shaper = ctx.createWaveShaper();
+    const curve = new Float32Array(1024);
+    for (let i = 0; i < curve.length; i++) { const x = (i / (curve.length - 1)) * 2 - 1; curve[i] = Math.tanh(x * 5); }
+    shaper.curve = curve;
+    const drive = gain(ctx, 3);
+    low.connect(filter(ctx, 'lowpass', 320)).connect(drive).connect(shaper).connect(filter(ctx, 'bandpass', 420, 0.45)).connect(growl).connect(this.ship.input);
+    const roarF = filter(ctx, 'bandpass', 700, 0.4);
     loop(ctx, this.buf.white).connect(roarF).connect(roar).connect(this.ship.input);
-    loop(ctx, this.buf.crackle).connect(filter(ctx, 'highpass', 300)).connect(crackle).connect(this.ship.input);
+    loop(ctx, this.buf.crackle).connect(filter(ctx, 'highpass', 400)).connect(crackle).connect(this.ship.input);
     // the air rushing past the hull, heard from outside
     const aero = gain(ctx), aeroF = filter(ctx, 'bandpass', 380, 0.6);
     loop(ctx, this.buf.white, 0.93).connect(aeroF).connect(aero).connect(this.ship.input);
@@ -167,18 +181,18 @@ class Sound {
     const breeze = gain(ctx);
     loop(ctx, this.buf.white, 0.5).connect(filter(ctx, 'bandpass', 1400, 0.4)).connect(breeze).connect(this.master);
     // the arms' drives at the tower: a low hydraulic hum with a whine
-    const drive = gain(ctx);
+    const armDrive = gain(ctx);
     const hum = ctx.createOscillator(), whine = ctx.createOscillator();
     hum.type = 'sawtooth'; hum.frequency.value = 58;
     whine.type = 'triangle'; whine.frequency.value = 410;
     const hw = gain(ctx, 0.12);
-    hum.connect(filter(ctx, 'lowpass', 300)).connect(drive);
-    whine.connect(hw).connect(drive);
-    loop(ctx, this.buf.brown, 2.2).connect(filter(ctx, 'bandpass', 220, 1)).connect(drive);
-    drive.connect(this.tower.input);
+    hum.connect(filter(ctx, 'lowpass', 300)).connect(armDrive);
+    whine.connect(hw).connect(armDrive);
+    loop(ctx, this.buf.brown, 2.2).connect(filter(ctx, 'bandpass', 220, 1)).connect(armDrive);
+    armDrive.connect(this.tower.input);
     hum.start(); whine.start();
 
-    this.n = { rumble, roar, crackle, roarF, aero, aeroF, wind, windF, surf, breeze, drive };
+    this.n = { rumble, growl, roar, crackle, roarF, aero, aeroF, wind, windF, surf, breeze, drive: armDrive };
   }
 
   /** A one-shot through an emitter (or straight to the microphone). */
@@ -246,27 +260,28 @@ class Sound {
     this.tower.place(cam.distanceTo(towerP), 40);
 
     // Raptors
-    const lit = live && s.spool > 0 ? s.engines * s.spool * Math.max(s.thr, 0.15) : 0;
-    const k = lit / 3;
-    n.rumble.gain.setTargetAtTime(1.6 * Math.sqrt(k), t, 0.06);
-    n.roar.gain.setTargetAtTime(0.5 * k, t, 0.06);
-    n.crackle.gain.setTargetAtTime(0.55 * Math.pow(k, 1.4), t, 0.06);
-    n.roarF.frequency.setTargetAtTime(380 + 500 * k, t, 0.1);
+    // a Raptor is loud even at its lowest throttle: level grows with engines and throttle, but from a high floor
+    const k = live && s.spool > 0 ? s.spool * Math.pow(s.engines / 3, 0.5) * (0.55 + 0.45 * clamp(s.thr, 0, 1)) : 0;
+    n.rumble.gain.setTargetAtTime(2.4 * k, t, 0.06);
+    n.growl.gain.setTargetAtTime(2 * k, t, 0.06);
+    n.roar.gain.setTargetAtTime(2 * k, t, 0.06);
+    n.crackle.gain.setTargetAtTime(1.2 * Math.pow(k, 1.2), t, 0.06);
+    n.roarF.frequency.setTargetAtTime(550 + 450 * k, t, 0.1);
     if (live && s.spool > 0 && L.spool === 0) this.shot(this.ship.input, this.buf.brown, t, 2.2, 260, 0.18);
     L.spool = live ? s.spool : 0;
 
     // air
     const v = live ? s.vel.length() : 0, q = Math.pow(v / 100, 2);
-    n.aero.gain.setTargetAtTime(clamp(0.8 * q, 0, 1.4), t, 0.15);
+    n.aero.gain.setTargetAtTime(clamp(0.22 * q, 0, 0.4) * (1 - 0.7 * k), t, 0.15);
     n.aeroF.frequency.setTargetAtTime(250 + v * 3, t, 0.2);
     const w = Math.pow(L.camSpeed / 100, 2);
-    n.wind.gain.setTargetAtTime(clamp(0.5 * w, 0, 1), t, 0.15);
+    n.wind.gain.setTargetAtTime(clamp(0.15 * w, 0, 0.3) * (1 - 0.7 * k), t, 0.15);
     n.windF.frequency.setTargetAtTime(300 + L.camSpeed * 6, t, 0.2);
 
     // shore: louder low down and near the beach
     const low = clamp(1 - cam.y / 250, 0, 1);
-    n.surf.gain.setTargetAtTime(0.5 * low * clamp(1 - Math.abs(cam.x - shoreX(cam.z)) / 1500, 0.15, 1), t, 0.3);
-    n.breeze.gain.setTargetAtTime(0.05 + 0.08 * low, t, 0.3);
+    n.surf.gain.setTargetAtTime(0.22 * low * clamp(1 - Math.abs(cam.x - shoreX(cam.z)) / 1500, 0.15, 1), t, 0.3);
+    n.breeze.gain.setTargetAtTime(0.02 + 0.04 * low, t, 0.3);
 
     // the arms: drives while they move, a clang as each closes, a heavy one on the catch
     const arms = sim.world.arms;
