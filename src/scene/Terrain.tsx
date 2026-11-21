@@ -2,8 +2,8 @@ import { useTexture } from '@react-three/drei';
 import { useFrame } from '@react-three/fiber';
 import { useMemo } from 'react';
 import {
-  BufferAttribute, ClampToEdgeWrapping, Color, MeshStandardMaterial, Path, PlaneGeometry, Shape, ShapeGeometry, SRGBColorSpace,
-  Vector2, Vector3, type Texture,
+  BufferAttribute, ClampToEdgeWrapping, DataTexture, FloatType, RedFormat, Color, MeshStandardMaterial, Path, PlaneGeometry, Shape, ShapeGeometry, SRGBColorSpace,
+  Vector2, type Texture,
 } from 'three';
 import farUrl from '../assets/terrain-far.jpg';
 import farRoughUrl from '../assets/terrain-far-rough.png';
@@ -15,6 +15,18 @@ import nearRoughUrl from '../assets/terrain-near-rough.png';
 import padUrl from '../assets/terrain-pad.jpg';
 import meta from '../assets/terrain.json';
 import { detailNoise, waterNormals } from './textures';
+
+/**
+ * The Gulf beach (game x) at a game z, traced from the imagery (scripts/terrain.py), held at its ends beyond.
+ * Across the border, where there is no imagery, it continues the trend of the coast at the river mouth.
+ */
+export function coastX(z: number) {
+  const c = meta.coast, f = Math.min(c.x.length - 1, Math.max(0, (z - c.z0) / c.dz));
+  const i = Math.min(c.x.length - 2, Math.floor(f));
+  return c.x[i] + (c.x[i + 1] - c.x[i]) * (f - i);
+}
+const COAST = new DataTexture(new Float32Array(meta.coast.x), meta.coast.x.length, 1, RedFormat, FloatType);
+COAST.needsUpdate = true;
 
 /**
  * Real ground from USGS data (public domain, see scripts/terrain.py):
@@ -120,7 +132,7 @@ function Apron() {
     const sea = new Color().setRGB(...(meta.apron.sea.map((v) => v / 255) as [number, number, number]), SRGBColorSpace);
     for (let i = 0; i < pos.count; i++) {
       const x = pos.getX(i), z = -pos.getY(i);
-      (x > meta.shore.x + meta.shore.slope * Math.max(-20000, Math.min(20000, z)) ? sea : land).toArray(col, i * 3);
+      (x > coastX(z) ? sea : land).toArray(col, i * 3);
     }
     g.setAttribute('color', new BufferAttribute(col, 3));
     return g;
@@ -138,7 +150,7 @@ function Apron() {
  * there is water, fades out over the surf near the beach so the imagery's breakers show through, and reflects
  * the sky and the low sun.
  */
-function Ocean({ masks, waves }: { masks: Texture[]; waves: Texture }) {
+function Ocean({ mask, waves }: { mask: Texture; waves: Texture }) {
   const SIZE = 160_000; // the camera sees 80 km
   const ripples = useMemo(() => {
     const r = waves.clone();
@@ -153,8 +165,8 @@ function Ocean({ masks, waves }: { masks: Texture[]; waves: Texture }) {
     });
     m.onBeforeCompile = (sh) => {
       Object.assign(sh.uniforms, {
-        uMid: { value: masks[0] }, uNear: { value: masks[1] }, uFar: { value: masks[2] },
-        uSite: { value: new Vector2(CX, CZ) }, uSizes: { value: new Vector3(meta.mid, meta.near, meta.far) },
+        uMid: { value: mask }, uCoast: { value: COAST }, uCoastZ: { value: new Vector2(meta.coast.z0, meta.coast.dz) },
+        uSite: { value: new Vector2(CX, CZ) }, uMidSize: { value: meta.mid },
         uShore: { value: new Vector2(meta.shore.x, meta.shore.slope) },
       });
       sh.vertexShader = sh.vertexShader
@@ -162,9 +174,15 @@ function Ocean({ masks, waves }: { masks: Texture[]; waves: Texture }) {
         .replace('#include <project_vertex>', '#include <project_vertex>\nvWorld = (modelMatrix * vec4(transformed, 1.0)).xyz;');
       sh.fragmentShader = sh.fragmentShader
         .replace('#include <common>', `#include <common>
-          varying vec3 vWorld; uniform sampler2D uMid, uNear, uFar; uniform vec2 uSite, uShore; uniform vec3 uSizes;
+          varying vec3 vWorld; uniform sampler2D uMid, uCoast; uniform vec2 uSite, uShore, uCoastZ; uniform float uMidSize;
           float seaIn(sampler2D t, vec2 d, float size) {
             return clamp((1.0 - texture2D(t, vec2(d.x, -d.y) / size + 0.5).g) / 0.62, 0.0, 1.0);
+          }
+          float coastX(float z) {
+            int n = textureSize(uCoast, 0).x;
+            float f = clamp((z - uCoastZ.x) / uCoastZ.y, 0.0, float(n - 1));
+            int i = min(int(f), n - 2);
+            return mix(texelFetch(uCoast, ivec2(i, 0), 0).r, texelFetch(uCoast, ivec2(i + 1, 0), 0).r, f - float(i));
           }`)
         // two layers of ripples at different scales and angles, so the pattern never visibly repeats
         .replace('#include <normal_fragment_maps>', /* glsl */ `
@@ -174,20 +192,22 @@ function Ocean({ masks, waves }: { masks: Texture[]; waves: Texture }) {
           vec3 n3 = texture2D(normalMap, mat2(-0.5, 0.87, -0.87, -0.5) * ruv * 2.3).xyz * 2.0 - 1.0;
           vec2 slope = (n1.xy * 0.45 + n2.xy + n3.xy * 0.5) * normalScale;
           normal = normalize(mat3(viewMatrix) * vec3(slope.x, 1.0, -slope.y)); // the plane lies flat: local z is world up`)
+        // the ground imagery lies 0.3 m below: far away that is too little depth to keep it from showing through
+        .replace('#include <logdepthbuf_fragment>', '#include <logdepthbuf_fragment>\n#ifdef USE_LOGARITHMIC_DEPTH_BUFFER\n gl_FragDepth -= 4e-5;\n#endif')
         .replace('#include <alphamap_fragment>', /* glsl */ `
           vec2 d = vWorld.xz - uSite;
           float a = max(abs(d.x), abs(d.y));
-          float past = vWorld.x - (uShore.x + uShore.y * clamp(vWorld.z, -20000.0, 20000.0));
-          float sea = step(0.0, past);
-          // past the centre: east of the surveyed shoreline is always sea (the coarse masks have gaps), plus any water they mark
-          if (a < uSizes.z * 0.5) sea = max(sea, seaIn(uFar, d, uSizes.z));
-          if (a < uSizes.y * 0.5) sea = max(smoothstep(0.0, 18.0, past), seaIn(uNear, d, uSizes.y) * step(0.0, past));
-          if (a < uSizes.x * 0.5) sea = seaIn(uMid, d, uSizes.x) * smoothstep(0.0, 18.0, past);
+          // the Gulf: east of the traced beach; in the centre, the lidar shoreline and the water the imagery shows
+          float sea = smoothstep(0.0, 18.0, vWorld.x - coastX(vWorld.z));
+          if (a < uMidSize * 0.5) {
+            float past = vWorld.x - (uShore.x + uShore.y * vWorld.z);
+            sea = mix(sea, seaIn(uMid, d, uMidSize) * smoothstep(0.0, 18.0, past), smoothstep(uMidSize * 0.5, uMidSize * 0.5 - 150.0, a));
+          }
           if (sea < 0.02) discard;
           diffuseColor.a = smoothstep(0.2, 0.95, sea);`);
     };
     return m;
-  }, [masks, ripples]);
+  }, [mask, ripples]);
   return (
     <mesh material={mat} position={[0, 0.3, 0]} rotation={[-Math.PI / 2, 0, 0]} renderOrder={1}>
       <planeGeometry args={[SIZE, SIZE, 64, 64]} />
@@ -214,7 +234,7 @@ export function Terrain() {
       <Ring outer={meta.near} inner={meta.mid} uvSize={meta.near} map={near} rough={nearRough} waves={waves} />
       <Ring outer={meta.far} inner={meta.near} uvSize={meta.far} map={far} rough={farRough} waves={waves} />
       <Apron />
-      <Ocean masks={[midRough, nearRough, farRough]} waves={waves} />
+      <Ocean mask={midRough} waves={waves} />
     </group>
   );
 }

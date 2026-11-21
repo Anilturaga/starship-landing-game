@@ -1,6 +1,7 @@
 import { Canvas, useFrame } from '@react-three/fiber';
 import { Suspense, useMemo, useRef } from 'react';
 import { Color, DirectionalLight, Quaternion, Vector3 } from 'three';
+import { audio } from '../audio/audio';
 import { applyInput } from '../state/input';
 import { useGame } from '../state/store';
 import { view } from '../state/view';
@@ -29,8 +30,11 @@ function SimDriver() {
 }
 
 /** Shares the camera's orientation with the HUD, so its instruments match the view. */
+/** Shares the camera with the HUD (its orientation) and the sound (its position). */
 function ViewProbe() {
-  useFrame(({ camera }) => {
+  useFrame(({ camera, scene }, dt) => {
+    if ('game' in window) Object.assign(window, { scene, camera }); // ?debug
+    audio.update(useGame.getState().sim, camera.position, dt);
     const c = view.cam, e = camera.matrixWorld.elements;
     c.right.set(e[0], e[1], e[2]).normalize();
     c.up.set(e[4], e[5], e[6]).normalize();

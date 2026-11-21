@@ -1,5 +1,5 @@
 import { useGesture } from '@use-gesture/react';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef } from 'react';
 import { GameScene } from './scene/GameScene';
 import { input, toggleEngines } from './state/input';
 import { useGame } from './state/store';
@@ -71,21 +71,13 @@ export default function App() {
   const gestures = useCameraGestures();
   const screen = useGame((s) => s.screen);
   const camera = useGame((s) => s.camera);
-  const [hint, setHint] = useState(false);
-  useEffect(() => {
-    if (screen !== 'flying') return;
-    setHint(true);
-    const t = setTimeout(() => setHint(false), 5000);
-    return () => clearTimeout(t);
-  }, [screen]);
   return (
     <>
-      <div className="stage" {...gestures()} onPointerDownCapture={() => setHint(false)}>
+      <div className="stage" {...gestures()}>
         <GameScene />
       </div>
       <div className={`vig${camera === 2 || camera === 3 ? ' on' : ''}`} />
       <Hud />
-      <div className={`hint${hint ? '' : ' off'}`}>Drag to look around · double-tap to reset</div>
       {screen !== 'menu' && <Controls />}
       {screen === 'menu' && <Menu />}
       {screen === 'ended' && <EndCard />}

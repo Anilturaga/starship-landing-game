@@ -57,7 +57,6 @@ button:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
 
 .shipg { display: flex; flex-direction: column; align-items: center; gap: 2px; }
 .shipg svg { width: 76px; height: 76px; display: block; overflow: visible; }
-.shipg .ring { fill: rgba(0, 0, 0, 0.18); stroke: rgba(255, 255, 255, 0.16); stroke-width: 1; }
 .shipg .hull { fill: rgba(5, 7, 9, 0.35); stroke: var(--fg); stroke-width: 1.4; stroke-linejoin: round; }
 .shipg .flap { fill: rgba(243, 245, 247, 0.55); }
 .shipg .tank { fill: none; stroke: rgba(243, 245, 247, 0.35); stroke-width: 0.8; }
@@ -68,9 +67,13 @@ button:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
 .shipt b { color: var(--fg); font-family: var(--f); font-weight: 500; font-size: 12px; letter-spacing: 0.02em; }
 .shipg.warn .shipt span:first-child b { color: var(--amber); } .shipg.crit .shipt span:first-child b { color: var(--bad); }
 @keyframes blink { 50% { opacity: 0.35; } }
-.eng { width: 40px; height: 40px; display: block; margin-top: 18px; }
+.shipg .eng { fill: none; stroke: var(--fg); stroke-width: 1.4; transition: fill 0.2s; }
+.shipg .eng.on { fill: var(--fg); } .shipg .eng.spool { fill: var(--amber); stroke: var(--amber); }
+.engg svg circle.hull { fill: rgba(5, 7, 9, 0.35); }
 
 .radar { display: flex; flex-direction: column; align-items: center; gap: 2px; }
+.radar.abort .ring { stroke: var(--bad); } .radar.abort .cross, .radar.abort .vec { stroke: var(--bad); }
+.abortb { position: absolute; top: -12px; left: 50%; transform: translateX(-50%); font-family: var(--fc); font-weight: 600; font-size: 10.5px; letter-spacing: 0.16em; color: #fff; background: var(--bad); padding: 3px 7px; border-radius: 2px; white-space: nowrap; animation: blink 1.2s steps(2) 3; }
 .radar svg { width: 92px; height: 92px; display: block; }
 .radar .ring { fill: rgba(0, 0, 0, 0.22); stroke: rgba(255, 255, 255, 0.22); stroke-width: 1; }
 .radar .ring.half { fill: none; stroke-dasharray: 2 3; }
@@ -100,7 +103,7 @@ button:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
 .thr .fill { position: absolute; left: 3px; right: 3px; bottom: 3px; background: linear-gradient(to top, rgba(255, 178, 74, 0.95), rgba(255, 226, 170, 0.95)); border-radius: 2px; }
 .thr .z { position: absolute; left: -1px; right: -1px; height: 0; border-top: 1px dashed rgba(255, 255, 255, 0.45); }
 .thr .zl { position: absolute; left: -22px; font-family: var(--fc); font-size: 10px; letter-spacing: 0.1em; color: var(--dim); transform: translateY(50%); }
-.thr .cap { position: absolute; top: -36px; left: -40px; right: -8px; text-align: right; line-height: 1.35; }
+.thr .cap { position: absolute; top: -18px; left: 0; right: 0; text-align: center; }
 .tghost { position: absolute; left: -7px; right: -7px; height: 0; border-top: 2px solid var(--guide); pointer-events: none; transition: bottom 0.3s ease-out; }
 .scope { position: fixed; left: calc(var(--inset-l) + 34px); bottom: calc(var(--inset-b) + 128px + 34px); width: 60px; height: 60px; border-radius: 50%; border: 1px solid var(--line); background: var(--glass); pointer-events: none; }
 .scope::before, .scope::after { content: ''; position: absolute; background: rgba(255, 255, 255, 0.16); }
@@ -110,31 +113,21 @@ button:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
 .scope .sk { width: 10px; height: 10px; margin: -5px 0 0 -5px; background: var(--fg); }
 .scope .sg { width: 22px; height: 22px; margin: -11px 0 0 -11px; border: 2px solid var(--guide); transition: transform 0.3s ease-out; }
 .scope.ok .sg { background: rgba(159, 228, 255, 0.35); }
-.tcue { position: fixed; right: var(--inset-r); bottom: calc(var(--inset-b) + var(--thr-h) + 52px); width: 52px; text-align: center; font-size: 15px; line-height: 1; color: var(--guide); pointer-events: none; }
 .abort .ghost, .abort .sg, .tghost.abort { border-color: var(--bad) !important; }
-.tcue.abort { color: var(--bad); }
 .chips { position: fixed; left: 50%; transform: translateX(-50%); top: calc(env(safe-area-inset-top, 0px) + 12px); display: flex; gap: 6px; }
 .chip { display: flex; justify-content: space-between; gap: 8px; font-family: var(--fc); font-size: 11.5px; letter-spacing: 0.16em; border: 1px solid var(--line); background: var(--glass); color: var(--dim); padding: 8px 10px; border-radius: 3px; cursor: pointer; text-transform: uppercase; white-space: nowrap; }
 .chip { align-items: center; }
+.chip.recenter { color: var(--fg); animation: pop 0.18s ease-out; }
+@keyframes pop { from { transform: scale(0.6); opacity: 0; } }
 .chip b { color: var(--fg); font-weight: 600; }
 /* portrait: the view buttons stack on the right, above the throttle, clear of both thumbs */
 @media (orientation: portrait) {
-  .chips { left: auto; right: var(--inset-r); top: auto; transform: none; bottom: calc(var(--inset-b) + var(--thr-h) + 92px); flex-direction: column; }
+  .chips { left: auto; right: var(--inset-r); top: auto; transform: none; bottom: calc(var(--inset-b) + var(--thr-h) + 40px); flex-direction: column; }
   .chip { flex-direction: column; justify-content: center; gap: 3px; width: 52px; padding: 7px 0; font-size: 9.5px; letter-spacing: 0.1em; }
 }
 /* short landscape screens: a shorter throttle, so its label clears the Ship gauge */
 @media (orientation: landscape) and (max-height: 500px) { :root { --thr-h: 140px; } }
 .mode b, .go { display: inline-flex; align-items: center; gap: 8px; }
-.tcue { display: flex; justify-content: center; font-size: 18px; }
-.callout { position: fixed; left: 50%; transform: translateX(-50%); top: calc(env(safe-area-inset-top, 0px) + 66px); width: max-content; max-width: min(44vw, 440px); display: flex; align-items: flex-start; gap: 9px; padding: 8px 12px; background: var(--glass); border: 1px solid var(--bad); font-size: 13.5px; line-height: 1.35; pointer-events: none; }
-.callout .ico { flex: none; color: var(--bad); }
-.callout small { display: block; color: var(--dim); font-size: 11px; margin-top: 2px; }
-.hint { position: fixed; left: 50%; top: 38%; transform: translateX(-50%); font-size: 12px; letter-spacing: 0.1em; background: var(--glass); border: 1px solid var(--line); padding: 7px 12px; pointer-events: none; transition: opacity 0.6s; white-space: nowrap; }
-.hint.off { opacity: 0; }
-@media (max-width: 680px) {
-  .callout { top: calc(env(safe-area-inset-top, 0px) + 170px); bottom: auto; max-width: calc(100vw - 32px); }
-}
-
 /* cards */
 .card {
   position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%); width: min(calc(100vw - 32px), 470px); max-height: calc(100% - 40px); overflow: auto;
@@ -162,4 +155,4 @@ kbd { font-family: var(--f); font-size: 11px; border: 1px solid var(--line); bor
 .btns { display: flex; gap: 10px; flex-wrap: wrap; }
 .go { font-family: var(--fc); font-weight: 600; font-size: 14px; letter-spacing: 0.2em; background: var(--fg); color: #000; border: 0; padding: 11px 22px; cursor: pointer; text-transform: uppercase; }
 .go.alt { background: transparent; color: var(--fg); border: 1px solid var(--line); }
-@media (prefers-reduced-motion: reduce) { .vig, .hint, .ghost, .tghost, .scope .sg { transition: none; } .shipg.crit .liq { animation: none; } }
+@media (prefers-reduced-motion: reduce) { .abortb, .chip.recenter { animation: none; } .vig, .ghost, .tghost, .scope .sg { transition: none; } .shipg.crit .liq { animation: none; } }

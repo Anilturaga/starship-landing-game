@@ -153,6 +153,129 @@ def sea_mask(im):
     return Image.fromarray(np.uint8(m * 255)).filter(ImageFilter.MedianFilter(7))
 
 
+def trace_coast(im, size):
+    """
+    Gulf beach per image row (game x, NaN where the imagery stops short of it): from the offshore edge of the
+    imagery westward to the first run of sand (redder than it is blue; the surf and shallows are bluer).
+    """
+    a = np.asarray(im, dtype=np.int32)
+    w = a.shape[0]
+    r, b = a[..., 0], a[..., 2]
+    black = a.sum(axis=2) < 25
+    sand = (r >= b + 3) & ~black
+    out = np.full(w, np.nan)
+    c = w // 2 + int((shore - TOWER_GAME_X) / size * w)  # near the lidar shoreline, for rows that start offshore
+    for y in range(w):
+        data = np.flatnonzero(~black[y])
+        if len(data) == 0 or data[-1] < c:
+            continue
+        x = data[-1]
+        while x > 3 and not sand[y, x - 3:x + 1].all():
+            x -= 1
+        out[y] = (x + 0.5 - w / 2) * size / w + TOWER_GAME_X
+    # median over ~400 m, which also drops the inlets and jetties
+    k = max(3, int(400 / (size / w)) | 1)
+    sm = out.copy()
+    for y in range(w):
+        win = out[max(0, y - k // 2):y + k // 2 + 1]
+        win = win[~np.isnan(win)]
+        sm[y] = np.median(win) if len(win) > k // 3 and not np.isnan(out[y]) else np.nan
+    sm[np.abs(out - sm) > 300] = np.nan  # rows cut off by the edge of the imagery
+    # inlets (the pass between the jetties) trace far inland: drop rows well off the trend over 2.5 km, bridge them
+    K = int(2500 / (size / w))
+    wide = np.array([np.nanmedian(sm[max(0, y - K // 2):y + K // 2 + 1]) if not np.isnan(sm[y]) else np.nan for y in range(w)])
+    sm[np.abs(sm - wide) > 200] = np.nan
+    ok = np.flatnonzero(~np.isnan(sm))
+    inside = np.arange(ok[0], ok[-1] + 1)
+    sm[inside] = np.interp(inside, ok, sm[ok])
+    return sm
+
+
+def extend(xs):
+    """Continues a traced coast past where the imagery ends: the trend of its last 2.5 km, levelling off over 2 km."""
+    xs = xs.copy()
+    ok = np.flatnonzero(~np.isnan(xs))
+    for end, seg, step in ((ok[-1], ok[-150:], 1), (ok[0], ok[:150], -1)):
+        k = np.polyfit(seg, xs[seg], 1)[0] if len(seg) > 10 else 0.0
+        y, i = end + step, 1
+        while 0 <= y < len(xs):
+            xs[y] = xs[end] + k * step * min(i, 120)
+            y, i = y + step, i + 1
+    return xs
+
+
+def quilt(a, hole, src, block=64, seed=3):
+    """Fills `hole` with feathered blocks of ground copied from random places in `src` (bool mask of good land)."""
+    rng = np.random.default_rng(seed)
+    h, w = hole.shape
+    acc = np.zeros((h, w, 3), np.float32)
+    wt = np.zeros((h, w), np.float32)
+    yy, xx = np.mgrid[0:block * 2, 0:block * 2]
+    bump = (np.sin(np.pi * (yy + 0.5) / (block * 2)) * np.sin(np.pi * (xx + 0.5) / (block * 2))) ** 2
+    sy, sx = np.nonzero(src[block:h - block * 2, block:w - block * 2])
+    for y0 in range(-block, h, block):
+        for x0 in range(-block, w, block):
+            if not hole[max(0, y0):y0 + 2 * block, max(0, x0):x0 + 2 * block].any():
+                continue
+            for _ in range(40):
+                i = rng.integers(len(sy))
+                py, px = sy[i] + block, sx[i] + block
+                if src[py:py + 2 * block, px:px + 2 * block].mean() > 0.8:
+                    break
+            patch = a[py:py + 2 * block, px:px + 2 * block]
+            pw8 = bump * src[py:py + 2 * block, px:px + 2 * block]  # only good source pixels count
+            ys, xs_ = slice(max(0, y0), min(h, y0 + 2 * block)), slice(max(0, x0), min(w, x0 + 2 * block))
+            oy, ox = ys.start - y0, xs_.start - x0
+            ph, pw = ys.stop - ys.start, xs_.stop - xs_.start
+            acc[ys, xs_] += patch[oy:oy + ph, ox:ox + pw] * pw8[oy:oy + ph, ox:ox + pw, None]
+            wt[ys, xs_] += pw8[oy:oy + ph, ox:ox + pw]
+    out = a.copy()
+    fillv = acc / np.maximum(wt, 1e-4)[..., None]
+    out[hole] = fillv[hole]
+    return out
+
+
+def far_fill(im, size, coast):
+    """
+    The wide patch has no imagery offshore or across the border. East of the coast: open-water colour. West of it:
+    ground quilted from the surveyed flats nearby, with a beach along the coast, feathered into the real imagery.
+    """
+    a = np.asarray(im, dtype=np.float32)
+    w = a.shape[0]
+    xs = (np.arange(w) - w / 2) * size / w + TOWER_GAME_X
+    black = a.sum(axis=2) < 25
+    sea = xs[None, :] > coast[:, None]
+    gap = black & ~sea
+    gap = np.asarray(Image.fromarray(np.uint8(gap * 255)).filter(ImageFilter.MaxFilter(5))) > 0
+    # source: the delta flats just north of the border (not open water or bright salt pans), which match the far side
+    r, g_, b = a[..., 0], a[..., 1], a[..., 2]
+    rows = np.zeros(w, bool)
+    rows[int(w * 0.5):int(w * 0.7)] = True
+    good = ~black & ~sea & (xs[None, :] < coast[:, None] - 1500) & rows[:, None] & ~(b > r + 6) & (a.sum(axis=2) < 560)
+    good = np.asarray(Image.fromarray(np.uint8(good * 255)).filter(ImageFilter.MinFilter(3))) > 0
+    grow = lambda m, r: np.asarray(Image.fromarray(np.uint8(m * 255)).filter(ImageFilter.GaussianBlur(r))) > 8
+    wide = grow(gap, 30) & ~sea  # the fill reaches into the surveyed land, so the two can be blended
+    q = quilt(a, wide, good)
+    # match the fill's tone to the surveyed land next to it
+    ring = grow(gap, 60) & ~gap & ~black & ~sea
+    q[wide] = q[wide] - q[wide].mean(axis=0) + a[ring].mean(axis=0)
+    # beach: a sand band along the coast where it was filled
+    d = coast[:, None] - xs[None, :]
+    sandc = np.array([196, 188, 170], np.float32)
+    band = np.clip(1 - np.abs(d - 90) / 90, 0, 1) * gap
+    q = q * (1 - band[..., None]) + sandc * band[..., None]
+    feather = np.maximum(np.asarray(Image.fromarray(np.uint8(gap * 255)).filter(ImageFilter.GaussianBlur(22)), np.float32)[..., None] / 255 * 2, gap[..., None]).clip(0, 1) * wide[..., None]
+    out = a * (1 - feather) + q * feather
+    # the outer 2.5 km fades to the plain colour of the ground beyond (the apron), so the patch has no edge
+    land = out[~sea & ~black].reshape(-1, 3).mean(axis=0)
+    ii = np.arange(w)
+    edge = np.minimum(np.minimum(ii, w - 1 - ii)[None, :], np.minimum(ii, w - 1 - ii)[:, None]) * size / w
+    fade = np.clip(1 - edge / 2500, 0, 1)[..., None] ** 1.5
+    out = out * (1 - fade) + land * fade
+    out[sea] = GULF
+    return Image.fromarray(np.uint8(np.clip(out, 0, 255)))
+
+
 def rough(mask):
     """Roughness map for three.js (green channel): sea glossy, land matte."""
     g = mask.point(lambda v: 255 - int(v * 0.62))  # sea roughness ~0.38: glints, but not a mirror
@@ -215,9 +338,22 @@ def geo_sea(im, size):
 
 near = sea_fill(near, NEAR / near.size[0], shore)
 FAR_SIZE = 35000
-far = naip(FAR_SIZE, 2048)  # same survey as the near patches, so the colours agree everywhere
-far_mpp = FAR_SIZE / far.size[0]
-far = sea_fill(far, far_mpp, shore, feather_px=70)
+far_raw = naip(FAR_SIZE, 2048)  # same survey as the near patches, so the colours agree everywhere
+far_mpp = FAR_SIZE / far_raw.size[0]
+# the Gulf beach for the whole wide patch: traced from the near imagery within it, the wide imagery beyond
+COAST_N = 513
+coast_far = extend(trace_coast(far_raw, FAR_SIZE))
+near_raw = naip(NEAR, 2048)
+coast_near = trace_coast(near_raw, NEAR)
+zf = (np.arange(2048) + 0.5 - 1024) * FAR_SIZE / 2048
+zn = (np.arange(2048) + 0.5 - 1024) * NEAR / 2048
+okn = ~np.isnan(coast_near)
+cz = np.linspace(-FAR_SIZE / 2, FAR_SIZE / 2, COAST_N)
+coast = np.interp(cz, zf, coast_far)
+inner = np.interp(cz, zn[okn], coast_near[okn])
+wn = np.clip((NEAR / 2 - 300 - np.abs(cz)) / 600, 0, 1)
+coast = coast * (1 - wn) + inner * wn
+far = far_fill(far_raw, FAR_SIZE, np.interp(zf, cz, coast))
 FAR = FAR_SIZE
 
 # seamless nesting: each patch fades into the one around it at its border
@@ -252,7 +388,7 @@ Image.fromarray(np.uint8(np.clip(np.round(h / SCALE), 0, 255))).save(os.path.joi
 
 fa = np.asarray(far, dtype=np.float32)
 fx = (np.arange(fa.shape[1]) - fa.shape[1] / 2) * far_mpp + TOWER_GAME_X
-land_c = fa[:, fx < shore - 3000].reshape(-1, 3).mean(axis=0)
+land_c = fa[2, :][fx < shore - 3000].mean(axis=0)  # the colour the wide patch fades to at its edge
 meta = {
     "apron": {"land": [int(v) for v in land_c], "sea": [int(v) for v in GULF]},
     "source": "USGS The National Map: NAIP Plus orthoimagery, USGSImageryOnly, 3DEP elevation (public domain)",
@@ -260,6 +396,7 @@ meta = {
     "pad": PAD, "mid": MID, "near": NEAR, "far": FAR,
     "height": {"size": N, "scale": SCALE, "max": float(h.max())},
     "shore": {"x": round(float(shore), 1), "slope": round(float(slope), 4)},
+    "coast": {"z0": -FAR_SIZE / 2, "dz": FAR_SIZE / (COAST_N - 1), "x": [round(float(v), 1) for v in coast]},
 }
 json.dump(meta, open(os.path.join(OUT, "terrain.json"), "w"), indent=2)
 print(json.dumps(meta, indent=2))

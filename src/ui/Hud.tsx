@@ -2,7 +2,7 @@ import { ArrowDown, ArrowUp } from '@phosphor-icons/react';
 import { Vector3 } from 'three';
 import { ARM_REACH, ARM_Y, CATCH, RADIUS, TOWER } from '../sim/constants';
 import { basePos, pinPos } from '../sim/outcome';
-import { bodyAxes, deltaVLeft } from '../sim/physics';
+import { bodyAxes } from '../sim/physics';
 import { useGame } from '../state/store';
 import { view } from '../state/view';
 import { useTicker } from './useTicker';
@@ -48,9 +48,10 @@ function telemetry() {
     arms: sim.world.arms.face.map((z) => [toLevel(ARM_REACH.x0, z), toLevel(ARM_REACH.x1, z)]),
     tower: [[-1, -1], [1, -1], [1, 1], [-1, 1]].map(([a, b]) => toLevel(TOWER.x + (a * TOWER.width) / 2, (b * TOWER.width) / 2)),
     propFrac: s.prop / sim.mode.propellant,
-    dv: deltaVLeft(s.prop),
     engines: s.spool > 0 ? s.engines : 0,
     spooling: s.spool > 0 && s.spool < 1,
+    thr: s.thr,
+    abort: sim.mode.guides && sim.running && !sim.outcome ? sim.guide.abort : null,
     att,
     tilt,
     settle: { ...settle },
@@ -131,7 +132,6 @@ function ShipGauge({ t }: { t: T }) {
   return (
     <div className={`shipg ${state}`}>
       <svg viewBox="-46 -46 92 92" role="img" aria-label={`Propellant ${Math.round(f * 100)} percent, tilt ${t.tilt.toFixed(0)} degrees`}>
-        <circle r="45" className="ring" />
         <g transform={`rotate(${t.att.toFixed(1)})`}>
           <path className="hull" d="M-9,40 L-9,-24 C-9,-33 -4,-40 0,-43 C4,-40 9,-33 9,-24 L9,40 Z" />
           <path className="flap" d="M-9,24 L-14,28 L-14,40 L-9,40 Z M9,24 L14,28 L14,40 L9,40 Z M-8,-28 L-12,-24 L-12,-17 L-8.6,-18 Z M8,-28 L12,-24 L12,-17 L8.6,-18 Z" />
@@ -142,26 +142,34 @@ function ShipGauge({ t }: { t: T }) {
       </svg>
       <div className="shipt">
         <span><b>{Math.round(f * 100)}</b>%</span>
-        <span>ΔV <b>{Math.round(t.dv)}</b></span>
         <span>TILT <b>{t.tilt.toFixed(0)}°</b></span>
       </div>
     </div>
   );
 }
 
+/** The six Raptors seen from below: three vacuum engines outside, the three sea-level ones lit as they run. */
 function Engines({ t }: { t: T }) {
+  const lit = t.engines > 0;
   return (
-    <svg viewBox="-32 -32 64 64" className="eng" role="img" aria-label={`${t.engines} Raptors lit`}>
-      {[0, 1, 2].map((i) => {
-        const a = ((i * 120 - 90) * Math.PI) / 180;
-        return <circle key={`v${i}`} cx={Math.cos(a) * 21} cy={Math.sin(a) * 21} r="8" fill="none" stroke="rgba(255,255,255,.3)" strokeWidth="1.2" />;
-      })}
-      {[0, 1, 2].map((i) => {
-        const a = ((i * 120 + 90) * Math.PI) / 180;
-        const on = i < t.engines;
-        return <circle key={`s${i}`} cx={Math.cos(a) * 9} cy={Math.sin(a) * 9} r="5.5" stroke="#f3f5f7" strokeWidth="1.4" fill={on ? (t.spooling ? 'rgba(255,178,74,.8)' : '#f3f5f7') : 'none'} />;
-      })}
-    </svg>
+    <div className="shipg engg">
+      <svg viewBox="-46 -46 92 92" role="img" aria-label={`${t.engines} Raptors lit, throttle ${Math.round(t.thr * 100)} percent`}>
+        <circle r="29" className="hull" />
+        {[0, 1, 2].map((i) => {
+          const a = ((i * 120 - 90) * Math.PI) / 180;
+          return <circle key={`v${i}`} cx={Math.cos(a) * 18.5} cy={Math.sin(a) * 18.5} r="7.5" className="tank" />;
+        })}
+        {[0, 1, 2].map((i) => {
+          const a = ((i * 120 + 90) * Math.PI) / 180;
+          const on = i < t.engines;
+          return <circle key={`s${i}`} cx={Math.cos(a) * 7.5} cy={Math.sin(a) * 7.5} r="5" className={on ? (t.spooling ? 'eng spool' : 'eng on') : 'eng'} />;
+        })}
+      </svg>
+      <div className="shipt">
+        <span><b>{t.engines}</b> ENG</span>
+        <span>{lit && t.spooling ? 'SPIN-UP' : <><b>{lit ? Math.round(t.thr * 100) : 0}</b>%</>}</span>
+      </div>
+    </div>
   );
 }
 
@@ -182,7 +190,8 @@ function Radar({ t }: { t: T }) {
   const lined = t.offset < t.limits.off;
   const above = t.armsAbove;
   return (
-    <div className="radar">
+    <div className={`radar${t.abort ? ' abort' : ''}`}>
+      {t.abort && <div className="abortb" role="status" title={t.abort.why}>ABORT · {t.abort.mode === 'ocean' ? 'OCEAN' : 'CLEAR'}</div>}
       <svg viewBox="-50 -50 100 100" role="img" aria-label={`${t.offset.toFixed(0)} metres from the catch point`}>
         <defs><clipPath id="rclip"><circle r="46" /></clipPath></defs>
         <circle r="46" className="ring" />

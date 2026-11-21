@@ -1,9 +1,10 @@
 import { useCallback, useRef, useState } from 'react';
-import { DRY_MASS, G0, THROTTLE_OFF } from '../sim/constants';
 import { CAMERAS, useGame } from '../state/store';
 import { input } from '../state/input';
 import { useTicker } from './useTicker';
-import { CaretDoubleDown, CaretDoubleUp, CaretDown, CaretUp, Circle, List, Timer, VideoCamera, WarningOctagon } from '@phosphor-icons/react';
+import { GpsFix, List, SpeakerSimpleHigh, SpeakerSimpleSlash, Timer, VideoCamera } from '@phosphor-icons/react';
+import { view } from '../state/view';
+import { audio } from '../audio/audio';
 
 const clamp = (v: number, a: number, b: number) => Math.min(b, Math.max(a, v));
 
@@ -29,10 +30,11 @@ function readControls() {
     abort: show ? g.abort : null,
     stick: { ...s.inp },
     thr: s.thr,
-    engines: s.engines,
-    spool: s.spool,
-    tw: s.thrust / ((DRY_MASS + s.prop) * G0),
     auto: sim.mode.autoThrottle,
+    moved: useGame.getState().camera === 0
+      ? !view.orbit.auto || Math.abs(view.orbit.dist - 105) > 1 || Math.abs(view.orbit.pitch - 0.08) > 0.01 || view.zoom !== 1
+      : view.look.yaw !== 0 || view.look.pitch !== 0 || view.zoom !== 1,
+    muted: audio.muted,
     speed: sim.autoSlow ? '½× auto' : sim.timeScale > 0.75 ? '1×' : sim.timeScale > 0.375 ? '½×' : '¼×',
   };
 }
@@ -67,7 +69,6 @@ function Stick({ c }: { c: ReturnType<typeof readControls> }) {
     >
       {c.stickCue && <div className="ghost" style={{ transform: `translate(${c.cue.x * 36}px,${-c.cue.y * 36}px)` }} />}
       <div className="knob" style={{ transform: `translate(${knob.x * 36}px,${knob.y * 36}px)` }} />
-      <div className="cap lbl">Pitch · lateral</div>
     </div>
   );
 }
@@ -80,11 +81,6 @@ function Throttle({ c }: { c: ReturnType<typeof readControls> }) {
     const r = el.current!.getBoundingClientRect();
     useGame.getState().sim.setThrottle(clamp(1 - (e.clientY - r.top) / r.height, 0, 1));
   };
-  const cap = c.auto
-    ? c.thr <= THROTTLE_OFF ? <>AUTO<br />OFF</> : <>AUTO<br />{c.engines || 1} ENG {Math.round(c.thr * 100)}%</>
-    : c.thr <= THROTTLE_OFF ? <>ENGINES<br />OFF</>
-    : c.spool < 1 ? <>SPIN-UP<br />{c.engines || 1} ENG</>
-    : <>{c.engines} ENG {Math.round(c.thr * 100)}%<br />T/W {c.tw.toFixed(2)}</>;
   return (
     <div
       ref={el} className={`thr${c.auto ? ' auto' : ''}`} aria-label="Throttle"
@@ -98,31 +94,20 @@ function Throttle({ c }: { c: ReturnType<typeof readControls> }) {
       <span className="zl" style={{ bottom: '18%' }}>1</span>
       <span className="zl" style={{ bottom: '50%' }}>2</span>
       <span className="zl" style={{ bottom: '83%' }}>3</span>
-      <div className="cap lbl">{cap}</div>
+      {c.auto && <div className="cap lbl">AUTO</div>}
     </div>
   );
 }
 
-/** Mirrors of the cues placed where thumbs don't cover them. */
-function Scopes({ c }: { c: ReturnType<typeof readControls> }) {
-  const ab = c.abort ? ' abort' : '';
+/** Mirror of the stick cue, above the stick where the thumb doesn't cover it. */
+function Scope({ c }: { c: ReturnType<typeof readControls> }) {
+  if (!c.stickCue) return null;
   const ok = Math.hypot(c.cue.x - c.stick.x, c.cue.y - c.stick.y) < 0.18;
-  const dT = c.cue.thr - c.thr;
   return (
-    <>
-      {c.stickCue && (
-        <div className={`scope${ok ? ' ok' : ''}${ab}`} aria-hidden="true">
-          <i className="sg" style={{ transform: `translate(${c.cue.x * 21}px,${-c.cue.y * 21}px)` }} />
-          <i className="sk" style={{ transform: `translate(${c.stick.x * 21}px,${-c.stick.y * 21}px)` }} />
-        </div>
-      )}
-      {c.thrCue && (
-        <div className={`tcue${ab}`} aria-hidden="true">
-          {dT > 0.12 ? <CaretDoubleUp weight="bold" /> : dT > 0.04 ? <CaretUp weight="bold" />
-            : dT < -0.12 ? <CaretDoubleDown weight="bold" /> : dT < -0.04 ? <CaretDown weight="bold" /> : <Circle weight="fill" size="0.7em" />}
-        </div>
-      )}
-    </>
+    <div className={`scope${ok ? ' ok' : ''}${c.abort ? ' abort' : ''}`} aria-hidden="true">
+      <i className="sg" style={{ transform: `translate(${c.cue.x * 21}px,${-c.cue.y * 21}px)` }} />
+      <i className="sk" style={{ transform: `translate(${c.stick.x * 21}px,${-c.stick.y * 21}px)` }} />
+    </div>
   );
 }
 
@@ -134,21 +119,16 @@ export function Controls() {
   const openMenu = useGame((s) => s.openMenu);
   return (
     <>
-      {c.abort && (
-        <div className="callout crit" role="status">
-          <WarningOctagon weight="fill" size={18} className="ico" />
-          <div>
-            {c.abort.mode === 'ocean' ? 'Abort: head for the ocean' : 'Abort: steer clear of the tower'}
-            <small>{c.abort.why}</small>
-          </div>
-        </div>
-      )}
       <Stick c={c} />
-      <Scopes c={c} />
+      <Scope c={c} />
       <Throttle c={c} />
       <div className="chips">
+        {c.moved && <button className="chip recenter" onClick={() => view.reset()} aria-label="Recenter the camera"><GpsFix size={18} weight="bold" /></button>}
         <button className="chip" onClick={() => setCamera(camera + 1)} aria-label="Next camera"><VideoCamera size={16} /><b>{CAMERAS[camera]}</b></button>
         <button className="chip" onClick={() => useGame.getState().sim.cycleSpeed()} aria-label="Game speed"><Timer size={16} /><b>{c.speed}</b></button>
+        <button className="chip" onClick={() => audio.setMuted(!audio.muted)} aria-label={c.muted ? 'Sound on' : 'Mute'}>
+          {c.muted ? <SpeakerSimpleSlash size={16} /> : <SpeakerSimpleHigh size={16} />}
+        </button>
         <button className="chip" onClick={openMenu} aria-label="Menu"><List size={16} weight="bold" /></button>
       </div>
     </>

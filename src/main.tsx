@@ -7,6 +7,6 @@ import './ui/styles.css';
 initPhysics().then(async () => {
   const [{ default: App }, { useGame }, { view }] = await Promise.all([import('./App'), import('./state/store'), import('./state/view')]);
   // ?debug exposes the game store and camera state for automated browser checks
-  if (new URLSearchParams(location.search).has('debug')) Object.assign(window, { game: useGame, view });
+  if (new URLSearchParams(location.search).has('debug')) Object.assign(window, { game: useGame, view, audio: (await import('./audio/audio')).audio });
   createRoot(document.getElementById('root')!).render(<StrictMode><App /></StrictMode>);
 });
