@@ -30,8 +30,9 @@ const PAD_POS = new Vector3(300, 45, 170);
  * Drives the single scene camera from the selected preset (modelled on the usual sets in flight and space games
  * and on SpaceX webcasts):
  *
- * 0 Chase: an orbit camera around the Ship that keeps the horizon level and stays where you leave it, like
- *   Kerbal Space Program's Free view. It starts behind the Ship with the landing site ahead; drag to orbit.
+ * 0 Chase (default): opens close on the Ship, then slowly pans out to show the landing site below it, and near
+ *   the tower moves to the open side of the arms. Drag to orbit freely (like Kerbal Space Program's Free view);
+ *   recenter hands it back to the automatic shot.
  * 1 Target: behind the Ship on the line from the catch, a little above, so the Ship and the landing site are
  *   both in frame; near the tower it settles on the open side of the arms. Drag to offset it.
  * 2 Onboard: the aft-flap camera, 3 Engines: the engine-bay camera (webcast views; drag to look around).
@@ -55,10 +56,32 @@ export function CameraRig() {
 
     if (idx === 0) {
       const o = view.orbit;
-      // placed once (at the start and on recenter): behind the Ship, the landing site ahead of the camera
-      if (o.reseat) { o.yaw = awayYaw + 0.35; o.pitch = 0.22; o.reseat = false; }
-      orbitAt(o.yaw, o.pitch, o.dist);
-      camera.lookAt(s.pos);
+      // auto: open close on the Ship alone, then slowly pull back and rise until the landing site shows below it;
+      // near the tower, swing to the open side of the arms so the tower never comes between the camera and the Ship.
+      // Dragging hands the orbit to the player; recenter gives it back.
+      const intro = smooth(1, 7, s.t);
+      const near = smooth(700, 220, s.pos.distanceTo(TOWER_TOP));
+      if (o.reseat) { o.yaw = awayYaw + 0.35; o.pitch = 0.08; o.reseat = false; }
+      if (o.auto) {
+        const elev = Math.atan2(s.pos.y - ARM_Y, Math.max(hd, 1));
+        const farYaw = awayYaw + 0.25, farPitch = clamp(elev + 0.3, 0.05, 0.9);
+        const wantYaw = farYaw + wrap(CATCH_YAW - farYaw) * near;
+        const wantPitch = 0.08 + (farPitch + (0.12 - farPitch) * near - 0.08) * intro;
+        const k = s.t < 0.05 ? 1 : 1 - Math.exp(-dt * 0.9);
+        o.yaw += wrap(wantYaw - o.yaw) * (s.t < 0.05 ? 1 : k * (0.3 + 0.7 * intro));
+        o.pitch += (wantPitch - o.pitch) * k;
+      }
+      // the opening shot fits the whole 50 m hull across the screen, however narrow (portrait phones)
+      const halfW = Math.atan(Math.tan((camera.fov * Math.PI) / 360) * camera.aspect);
+      const dist = o.auto ? Math.max(o.dist, (36 / Math.tan(halfW)) * (1 - intro)) : o.dist;
+      orbitAt(o.yaw, o.pitch, dist);
+      if (o.auto) {
+        // pan the view down from the Ship to take in the landing site as well
+        const m = intro * (0.4 * (1 - near) + 0.2 * near);
+        const dS = tmp.a.subVectors(s.pos, camera.position).normalize();
+        const dT = tmp.b.subVectors(TOWER_TOP, camera.position).normalize();
+        camera.lookAt(tmp.v.copy(dS).lerp(dT, m).add(camera.position));
+      } else camera.lookAt(s.pos);
     } else if (idx === 1) {
       const near = smooth(700, 220, s.pos.distanceTo(TOWER_TOP));
       const elev = Math.atan2(s.pos.y - ARM_Y, Math.max(hd, 1));
