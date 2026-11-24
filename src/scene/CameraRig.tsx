@@ -13,6 +13,23 @@ const CATCH_YAW = Math.atan2(1, 0.45);
 const TOWER_TOP = new Vector3(CATCH.x, ARM_Y, CATCH.z);
 const clamp = (v: number, a: number, b: number) => Math.min(b, Math.max(a, v));
 
+/**
+ * Direction from the Ship to the automatic chase camera. Far out it sits above the line from the landing site
+ * through the Ship (tilted LIFT past it, and a little to one side), so looking down past the Ship it sees the tower
+ * higher on the screen; it starts level behind the Ship and ends on the open side of the arms.
+ */
+const LIFT = 0.3, SIDE = 0.15;
+function autoChaseDir(out: Vector3, ax: number, az: number, elev: number, intro: number, near: number) {
+  const yaw = Math.atan2(ax, az) + SIDE;
+  const up = elev + LIFT;
+  const far = new Vector3(Math.sin(yaw) * Math.cos(up), Math.sin(up), Math.cos(yaw) * Math.cos(up));
+  const y0 = yaw + 0.2;
+  const start = new Vector3(Math.sin(y0) * Math.cos(0.08), Math.sin(0.08), Math.cos(y0) * Math.cos(0.08));
+  const cp = Math.cos(0.12);
+  const end = new Vector3(Math.sin(CATCH_YAW) * cp, Math.sin(0.12), Math.cos(CATCH_YAW) * cp);
+  return out.copy(start).lerp(far, intro).lerp(end, near).normalize();
+}
+
 /** A camera fixed to the hull, defined in body coordinates. */
 function onboard(pos: [number, number, number], look: [number, number, number], up: [number, number, number], fov: number) {
   const p = new Vector3(...pos);
@@ -40,7 +57,7 @@ const PAD_POS = new Vector3(300, 45, 170);
  */
 export function CameraRig() {
   const camera = useThree((s) => s.camera) as PerspectiveCamera;
-  const tmp = useMemo(() => ({ q: new Quaternion(), v: new Vector3(), a: new Vector3(), b: new Vector3(), lastSim: null as unknown, padCut: false, tYaw: 0, tPitch: 0.3 }), []);
+  const tmp = useMemo(() => ({ q: new Quaternion(), v: new Vector3(), a: new Vector3(), b: new Vector3(), lastSim: null as unknown, padCut: false, dir: new Vector3(), w: new Vector3(), tYaw: 0, tPitch: 0.3 }), []);
 
   useFrame((_, dt) => {
     const { sim, camera: idx } = useGame.getState();
@@ -56,28 +73,28 @@ export function CameraRig() {
 
     if (idx === 0) {
       const o = view.orbit;
-      // auto: open close on the Ship alone, then slowly pull back and rise until the landing site shows below it;
-      // near the tower, swing to the open side of the arms so the tower never comes between the camera and the Ship.
-      // Dragging hands the orbit to the player; recenter gives it back.
+      // auto: open level behind the Ship, then slowly rise above it, on the far side from the landing site, until
+      // the camera looks down past the Ship at the tower: the Ship sits low on the screen and the tower above it,
+      // clear of the thumb controls. Close in, swing to the open side of the arms for the catch.
       const intro = smooth(1, 7, s.t);
       const near = smooth(700, 220, s.pos.distanceTo(TOWER_TOP));
-      if (o.reseat) { o.yaw = awayYaw + 0.35; o.pitch = 0.08; o.reseat = false; }
+      if (o.reseat) { o.yaw = awayYaw + 0.35; o.pitch = 0.08; o.reseat = false; tmp.dir.set(0, 0, 0); }
       if (o.auto) {
-        const elev = Math.atan2(s.pos.y - ARM_Y, Math.max(hd, 1));
-        const farYaw = awayYaw + 0.25, farPitch = clamp(elev + 0.3, 0.05, 0.9);
-        const wantYaw = farYaw + wrap(CATCH_YAW - farYaw) * near;
-        const wantPitch = 0.08 + (farPitch + (0.12 - farPitch) * near - 0.08) * intro;
-        const k = s.t < 0.05 ? 1 : 1 - Math.exp(-dt * 0.9);
-        o.yaw += wrap(wantYaw - o.yaw) * (s.t < 0.05 ? 1 : k * (0.3 + 0.7 * intro));
-        o.pitch += (wantPitch - o.pitch) * k;
+        const want = autoChaseDir(tmp.w, hx / Math.max(hd, 1), hz / Math.max(hd, 1), Math.atan2(s.pos.y - ARM_Y, Math.max(hd, 1)), intro, near);
+        if (tmp.dir.lengthSq() < 0.5 || s.t < 0.05) tmp.dir.copy(want);
+        else tmp.dir.lerp(want, 1 - Math.exp(-dt * 0.9)).normalize();
+        o.yaw = Math.atan2(tmp.dir.x, tmp.dir.z);
+        o.pitch = Math.asin(clamp(tmp.dir.y, -1, 1));
       }
       // the opening shot fits the whole 50 m hull across the screen, however narrow (portrait phones)
       const halfW = Math.atan(Math.tan((camera.fov * Math.PI) / 360) * camera.aspect);
-      const dist = o.auto ? Math.max(o.dist, (36 / Math.tan(halfW)) * (1 - intro)) : o.dist;
+      // and on the final approach it backs off enough to keep the tower in frame with the Ship until the catch
+      const sep = s.pos.distanceTo(TOWER_TOP);
+      const dist = o.auto ? Math.max(o.dist, (36 / Math.tan(halfW)) * (1 - intro), 1.4 * sep * near) : o.dist;
       orbitAt(o.yaw, o.pitch, dist);
       if (o.auto) {
-        // pan the view down from the Ship to take in the landing site as well
-        const m = intro * (0.4 * (1 - near) + 0.2 * near);
+        // pan from the Ship to take in the landing site as well
+        const m = intro * (0.5 * (1 - near) + 0.4 * near);
         const dS = tmp.a.subVectors(s.pos, camera.position).normalize();
         const dT = tmp.b.subVectors(TOWER_TOP, camera.position).normalize();
         camera.lookAt(tmp.v.copy(dS).lerp(dT, m).add(camera.position));

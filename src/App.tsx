@@ -53,7 +53,7 @@ function useCameraGestures() {
         if (useGame.getState().camera === 0) {
           view.orbit.auto = false;
           view.orbit.yaw -= dx * 0.006;
-          view.orbit.pitch = clamp(view.orbit.pitch + dy * 0.005, -0.6, 1.4);
+          view.orbit.pitch = clamp(view.orbit.pitch + dy * 0.005, -0.6, 1.55);
         } else {
           view.look.yaw = clamp(view.look.yaw - dx * 0.004, -1.4, 1.4);
           view.look.pitch = clamp(view.look.pitch - dy * 0.004, -0.9, 0.9);

@@ -181,6 +181,11 @@ function Ocean({ mask, waves }: { mask: Texture; waves: Texture }) {
           normal = normalize(mat3(viewMatrix) * vec3(slope.x, 1.0, -slope.y)); // the plane lies flat: local z is world up`)
         // the ground imagery lies 0.3 m below: far away that is too little depth to keep it from showing through
         .replace('#include <logdepthbuf_fragment>', '#include <logdepthbuf_fragment>\n#ifdef USE_LOGARITHMIC_DEPTH_BUFFER\n gl_FragDepth -= 4e-5;\n#endif')
+        // light scattered back up out of the murky Gulf water: from overhead there is little sky to reflect,
+        // and without it the sea reads as a black void
+        .replace('#include <emissivemap_fragment>', /* glsl */ `#include <emissivemap_fragment>
+          vec3 upV = normalize((viewMatrix * vec4(0.0, 1.0, 0.0, 0.0)).xyz);
+          totalEmissiveRadiance += vec3(0.05, 0.062, 0.06) * abs(dot(normalize(vViewPosition), upV));`)
         .replace('#include <alphamap_fragment>', /* glsl */ `
           vec2 d = vWorld.xz - uSite;
           float a = max(abs(d.x), abs(d.y));
