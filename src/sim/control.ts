@@ -29,7 +29,7 @@ export function inGate(x: number, y: number, r = 1) {
   return l > r ? { x: (x / l) * r, y: (y / l) * r } : { x, y };
 }
 
-/** Nose direction (world) for an upright tilt command, in the Ship's roll-held body frame. */
+/** Nose direction (world) for an upright tilt command, in the Ship's body frame (rolled to line the pins up with the arms). */
 export function uprightNose(s: ShipState, x: number, y: number, out = new Vector3()) {
   const { x: BX, z: BZ } = bodyAxes(s.q, ax);
   const fwd = T1.set(BZ.x, 0, BZ.z), side = T2.set(BX.x, 0, BX.z);

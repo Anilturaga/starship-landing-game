@@ -1,5 +1,5 @@
 import { MODES, type ModeId } from '../sim/modes';
-import { Crosshair, GraduationCap, SteeringWheel, type Icon } from '@phosphor-icons/react';
+import { Crosshair, GraduationCap, Play, SteeringWheel, type Icon } from '@phosphor-icons/react';
 import { useGame } from '../state/store';
 
 const ICONS: Record<ModeId, Icon> = { cadet: GraduationCap, pilot: SteeringWheel, expert: Crosshair };
@@ -7,10 +7,13 @@ const ICONS: Record<ModeId, Icon> = { cadet: GraduationCap, pilot: SteeringWheel
 export function Menu() {
   const modeId = useGame((s) => s.modeId);
   const start = useGame((s) => s.start);
+  const paused = useGame((s) => s.screen === 'paused');
+  const resume = useGame((s) => s.resume);
   return (
     <div className="card" role="dialog" aria-labelledby="menu-title">
       <h1 id="menu-title">Starship Landing Game</h1>
       <p>Bring Ship down from 2.6 km and set it into the tower's arms before the propellant runs out.</p>
+      {paused && <div className="btns"><button className="go" onClick={resume}><Play weight="bold" /> Resume flight</button></div>}
       <div className="modes">
         {(Object.keys(MODES) as ModeId[]).map((id) => {
           const I = ICONS[id];
@@ -39,7 +42,7 @@ export function Menu() {
           <span><kbd>C</kbd> camera</span>
           <span><kbd>T</kbd> slow motion</span>
           <span><kbd>R</kbd> restart</span>
-          <span><kbd>Esc</kbd> menu</span>
+          <span><kbd>Esc</kbd> pause</span>
         </div>
       </details>
       <p className="credit">Ground imagery and elevation: USGS The National Map (public domain).</p>

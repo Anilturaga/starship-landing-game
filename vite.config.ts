@@ -7,5 +7,5 @@ const single = process.env.SINGLE === '1';
 
 export default defineConfig({
   plugins: [react(), single && viteSingleFile()],
-  test: { environment: 'node', include: ['tests/**/*.test.ts'] },
+  test: { environment: 'node', include: ['tests/**/*.test.ts'], testTimeout: 60_000 }, // whole flights take a while
 });

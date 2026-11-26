@@ -59,7 +59,7 @@ export function measure(s: ShipState, hits: ReadonlySet<Hit>): Measured {
 }
 
 /** What the end card says for each way a flight can end (the flight machine's outcome states). */
-const WHY: Record<string, (m: Measured, l: CatchLimits) => string> = {
+export const WHY: Record<string, (m: Measured, l: CatchLimits) => string> = {
   'caught': () => 'The Ship settled onto the arms within limits.',
   'ground': () => 'The Ship touched down upright, but on the ground instead of in the arms.',
   'ocean.soft': () => 'Soft splashdown in the Gulf. The Ship is lost, but the tower and pad are safe.',

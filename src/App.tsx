@@ -18,8 +18,8 @@ function useKeyboard() {
       const g = useGame.getState();
       if (HELD.includes(e.code)) { input.keys.add(e.code); e.preventDefault(); return; }
       if (e.repeat) return;
-      if (e.code === 'Escape') g.openMenu();
-      else if (e.code === 'Space') { e.preventDefault(); if (g.screen === 'flying') toggleEngines(g.sim); else g.start(); }
+      if (e.code === 'Escape') { if (g.screen === 'paused') g.resume(); else g.openMenu(); }
+      else if (e.code === 'Space') { e.preventDefault(); if (g.screen === 'flying') toggleEngines(g.sim); else if (g.screen === 'paused') g.resume(); else g.start(); }
       else if (e.code === 'KeyC') g.setCamera(g.camera + 1);
       else if (/^Digit[1-5]$/.test(e.code)) g.setCamera(+e.code.slice(5) - 1);
       else if (e.code === 'KeyT') g.sim.cycleSpeed();
@@ -78,8 +78,8 @@ export default function App() {
       </div>
       <div className={`vig${camera === 2 || camera === 3 ? ' on' : ''}`} />
       <Hud />
-      {screen !== 'menu' && <Controls />}
-      {screen === 'menu' && <Menu />}
+      {(screen === 'flying' || screen === 'ended') && <Controls />}
+      {(screen === 'menu' || screen === 'paused') && <Menu />}
       {screen === 'ended' && <EndCard />}
     </>
   );
