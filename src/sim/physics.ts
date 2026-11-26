@@ -8,6 +8,8 @@ import {
 } from './constants';
 
 const clamp = (v: number, a: number, b: number) => Math.min(b, Math.max(a, v));
+const ROLL_GAIN = 0.5; // 1/s, pin misalignment to roll rate
+const ROLL_RATE = 0.15; // rad/s, fastest roll toward the arms
 
 /** The four flaps in a fixed order: side -1 = body -X, side +1 = body +X. */
 export const FLAPS = [
@@ -161,7 +163,10 @@ export function physStep(s: ShipState, dt: number, env: Env, world: SiteWorld) {
   const tx = clamp(Ip * 3 * (r.x - s.w.x), -avail, avail);
   const tz = clamp(Ip * 3 * (r.z - s.w.z), -avail, avail);
   const rollLim = RCS_TORQUE + aF * 0.3;
-  const ty = clamp(Ir * 3 * -s.w.y, -rollLim, rollLim); // roll is always held
+  // roll is held; once upright it turns the pins (body X) in line with the arms (world z), either way round,
+  // as nothing else can: the pins slip between the arms when more than ~47° off
+  const rollTo = s.ref === 'upright' ? clamp(-ROLL_GAIN * Math.atan(BX.x / BX.z), -ROLL_RATE, ROLL_RATE) : 0;
+  const ty = clamp(Ir * 3 * (rollTo - s.w.y), -rollLim, rollLim);
   const ux = tx / avail, uz = tz / avail;
   s.ctrl.x = ux; s.ctrl.z = uz; s.flapAuthority = aF; s.gimbalAuthority = aG;
 

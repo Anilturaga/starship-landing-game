@@ -111,7 +111,7 @@ export interface Measured {
   aboveArms: number;
 }
 
-const within = (m: Measured, l: CatchLimits) => m.offset < l.off && m.descent < l.vs && m.sideways < l.hs && m.tilt < l.tilt;
+export const within = (m: Measured, l: CatchLimits) => m.offset < l.off && m.descent < l.vs && m.sideways < l.hs && m.tilt < l.tilt;
 type Args = { context: { limits: CatchLimits }; event: { m: Measured } };
 const on = (f: (m: Measured, l: CatchLimits) => boolean) => ({ context, event }: Args) => f(event.m, context.limits);
 const hit = (h: Hit) => on((m) => m.hits.has(h));
@@ -132,9 +132,9 @@ export const flightMachine = setup({
     carriage: hit('carriage'),
     qdArm: hit('qd-arm'),
     hullArm: hit('hull-arm'),
-    armOpen: hit('arm-open'),
+    armOpen: on((m, l) => m.hits.has('arm-open') && within(m, l)), // only when nothing else was wrong
     caught: on((m, l) => m.hits.has('arms') && within(m, l)),
-    armsOverLimit: hit('arms'),
+    armsOverLimit: on((m) => m.hits.has('arms') || m.hits.has('arm-open')),
     mount: hit('mount'),
     softSplash: touchedDown((m) => m.inOcean && m.descent < 6),
     hardSplash: touchedDown((m) => m.inOcean),

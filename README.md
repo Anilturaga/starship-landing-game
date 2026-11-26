@@ -60,6 +60,6 @@ python3 scripts/terrain.py
 | Throttle (0 = engines off) | Right slider | Shift up, X down, Space off/on |
 | Camera | Cam button, or drag the view | C, 1–5 |
 | Slow motion | Speed button | T |
-| Restart / menu | ☰ | R / Esc |
+| Restart / pause | ☰ | R / Esc |
 
 This is a fan project. It is not affiliated with SpaceX and uses none of its logos or assets.

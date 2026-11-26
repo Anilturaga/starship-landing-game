@@ -1,6 +1,6 @@
 import { Vector3 } from 'three';
 import {
-  ARM_REACH, ARM_Y, ARMS, CATCH, DRY_MASS, FLIP_ALT, G0, HALF, MAX_TILT, PIN_OFFSET, RADIUS, RAPTOR_THRUST, shoreX, SL_ENGINES, THROTTLE_OFF,
+  ARM_REACH, ARM_Y, ARMS, CATCH, DRY_MASS, ENGINE_OUT_PROP, FLIP_ALT, G0, HALF, MAX_TILT, PIN_OFFSET, RADIUS, RAPTOR_THRUST, shoreX, SL_ENGINES, THROTTLE_OFF,
 } from './constants';
 import { BELLY_PITCH, inGate } from './control';
 import type { GuideTick } from './flight';
@@ -137,7 +137,10 @@ function descend(v: View, g: Guide, d: number, dir: Vector3) {
   // target descent rate: 2 m/s² braking profile, easing to ~1 m/s for the last metres onto the arms
   let vt = h > 0 ? clamp(Math.min(Math.sqrt(4 * h), 1 + 0.25 * h), 1, 60) : 0;
   // close to the arms, creep down until lined up and steady, as a pilot would
-  if (!ab && h < 60 && (d > 1.5 || v.vh.length() > 1.2)) vt = Math.min(vt, 0.3 + Math.max(0, h - 10) * 0.1);
+  // in the last 2 m, more than 2 m off centre, it hovers instead (creeping lower would set it down past the
+  // limit) until lined up or the tanks are down to the engine-out reserve
+  const hover = h <= 2 && d >= 2 && v.mass - DRY_MASS > ENGINE_OUT_PROP;
+  if (!ab && h < 60 && (d > 1.5 || v.vh.length() > 1.2)) vt = Math.min(vt, hover ? 0 : 0.3 + Math.max(0, h - 10) * 0.1);
   // the hull hangs 40 m below the pins: keep it above the arms until it is in the corridor between them
   if (!ab && !inCorridor(v.pin) && d < 90) vt = Math.min(vt, h > HULL_BELOW + 7 ? Math.sqrt(2.5 * (h - HULL_BELOW - 7)) : -1);
   if (toOcean) vt = clamp(Math.min(vt, h / Math.max(1, d / 22)), 2, 60); // slow down to buy time
@@ -150,6 +153,29 @@ function descend(v: View, g: Guide, d: number, dir: Vector3) {
     stick: { x: ah.dot(side) * k, y: ah.dot(fwd) * k },
     throttle: clamp((aNeed * v.mass) / Math.max(0.5, Math.cos((v.tilt * Math.PI) / 180)) / MAX_THRUST, 0.05, 1),
   };
+}
+
+/**
+ * The flip burn, from the descent rate `vs` (m/s, + falling), the height `h` (m, at least 1) to stop in, and
+ * whether the engines are `lit`: off while climbing (even minimum thrust lifts a nearly empty Ship, so only
+ * cutting the engines stops a climb), and once off, until falling faster than 5 m/s (so they cut and relight seconds apart, not every step);
+ * braking harder than minimum when needing more than 3 m/s² to stop (vs²/2h > 3), spun up and with the nose
+ * well up (tilt < 45°, or the burn would push the Ship forward); else minimum.
+ * Proved to cut the engines whenever climbing, and to brake only while falling: verification/Guidance.lean.
+ */
+export function flipBurn(vs: number, h: number, tilt: number, spun: boolean, lit: boolean): 'off' | 'min' | 'brake' {
+  if (vs < -1 || (!lit && vs < 5)) return 'off';
+  return (vs * vs) / (2 * h) > 3 && spun && tilt < 45 ? 'brake' : 'min';
+}
+
+/**
+ * The flip cue: turn whichever way raises the nose, from how much the side (`bxY`) and the belly (`bzY`) point up.
+ * From the belly-flop that is straight back; tipped over from upright it can be any direction.
+ * Proved to raise the nose whichever way the Ship leans: verification/Guidance.lean.
+ */
+export function flipCue(bxY: number, bzY: number) {
+  const n = Math.hypot(bxY, bzY) || 1;
+  return { x: (-GATE * bxY) / n, y: (GATE * bzY) / n };
 }
 
 /**
@@ -182,13 +208,12 @@ export function steer(v: View, g: Guide) {
   } else if (g.phase === 'glide') {
     stick = glide(v, g, d, dir);
   } else {
-    // light the Raptors, then hold the stick back until the Ship is upright
+    // light the Raptors, then swing the Ship upright
     const spun = g.phase === 'flip';
-    stick = { x: 0, y: spun ? -GATE : 0 };
+    stick = spun ? flipCue(v.BX.y, v.BZ.y) : { x: 0, y: 0 };
     const h = Math.max(1, g.abort ? v.base.y : v.hArm);
-    const aReq = (v.vs * v.vs) / (2 * h);
-    // minimum thrust until the nose is well up, or the burn would push the Ship forward
-    g.throttle = aReq > 3 && spun && v.tilt < 45 ? clamp(((aReq + G0) * v.mass) / MAX_THRUST, 0.15, 1) : 0.15;
+    const burn = flipBurn(v.vs, h, v.tilt, spun, v.lit);
+    g.throttle = burn === 'off' ? 0 : burn === 'min' ? 0.15 : clamp((((v.vs * v.vs) / (2 * h) + G0) * v.mass) / MAX_THRUST, 0.15, 1);
   }
   g.stick = inGate(stick.x, stick.y, GATE);
 }

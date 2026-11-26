@@ -1,6 +1,6 @@
 import { ArrowDown, ArrowUp } from '@phosphor-icons/react';
 import { Vector3 } from 'three';
-import { ARM_REACH, ARM_Y, CATCH, RADIUS, TOWER } from '../sim/constants';
+import { ARM_REACH, ARM_Y, CATCH, RADIUS, THROTTLE_OFF, TOWER } from '../sim/constants';
 import { basePos, pinPos } from '../sim/outcome';
 import { bodyAxes } from '../sim/physics';
 import { useGame } from '../state/store';
@@ -49,7 +49,7 @@ function telemetry() {
     tower: [[-1, -1], [1, -1], [1, 1], [-1, 1]].map(([a, b]) => toLevel(TOWER.x + (a * TOWER.width) / 2, (b * TOWER.width) / 2)),
     propFrac: s.prop / sim.mode.propellant,
     engines: s.spool > 0 ? s.engines : 0,
-    spooling: s.spool > 0 && s.spool < 1,
+    spooling: s.thr > THROTTLE_OFF && s.spool < 1,
     thr: s.thr,
     abort: sim.mode.guides && sim.running && !sim.outcome ? sim.guide.abort : null,
     att,

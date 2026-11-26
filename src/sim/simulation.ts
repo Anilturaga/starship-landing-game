@@ -15,7 +15,7 @@ function leaf(v: unknown): string {
   return `${k}.${leaf(sub)}`;
 }
 
-const GUIDE_PERIOD = 0.1; // s of sim time between flight-computer updates
+const GUIDE_EVERY = Math.round(0.1 / STEP); // steps between flight-computer updates
 export const SPEEDS = [1, 0.5, 0.25] as const;
 
 /**
@@ -44,7 +44,7 @@ export class Simulation {
   readonly flight;
   private env: Env;
   private acc = 0;
-  private guideClock = 0;
+  private guideSteps = 0;
   private pin = new Vector3();
 
   constructor(mode: Mode) {
@@ -95,9 +95,8 @@ export class Simulation {
       s.w.set(0, 0, 0);
       return;
     }
-    this.guideClock += STEP;
-    if (this.guideClock >= GUIDE_PERIOD) {
-      this.guideClock = 0;
+    if (++this.guideSteps === GUIDE_EVERY) {
+      this.guideSteps = 0;
       this.runGuide();
     }
   }

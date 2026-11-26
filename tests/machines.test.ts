@@ -107,14 +107,14 @@ describe('flight machine: flight computer', () => {
 });
 
 describe('screen machine', () => {
-  it('goes menu → flying → ended → flying → menu', () => {
+  it('goes menu → flying → ended → flying → paused → flying → ended → menu', () => {
     const a = createActor(screenMachine).start();
     const seen = [a.getSnapshot().value];
-    for (const type of ['FINISH', 'START', 'FINISH', 'START', 'MENU'] as const) {
+    for (const type of ['FINISH', 'START', 'FINISH', 'START', 'MENU', 'RESUME', 'FINISH', 'MENU'] as const) {
       a.send({ type });
       seen.push(a.getSnapshot().value);
     }
-    expect(seen).toEqual(['menu', 'menu', 'flying', 'ended', 'flying', 'menu']);
+    expect(seen).toEqual(['menu', 'menu', 'flying', 'ended', 'flying', 'paused', 'flying', 'ended', 'menu']);
   });
 });
 

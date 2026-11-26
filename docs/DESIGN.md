@@ -57,7 +57,7 @@ Attitude control blends three effectors, sharing out the requested torque among 
 
 - **Flaps**, whose authority scales with dynamic pressure. Four electric flaps are the main control in the belly-flop. They change drag at each corner, and the actuators move at a limited rate.
 - **Engine gimbal**, whose authority scales with thrust. This is what flips the vehicle.
-- **RCS**, a small constant torque. It is also always on to hold roll.
+- **RCS**, a small constant torque. It also controls roll: held through the belly-flop and flip, and once upright, turning the catch pins in line with the arms (in every mode: the player has no roll control).
 
 **Engines.** Throttle 0 means off, and anything above zero lights the engines. The flight computer picks how many engines (1–3) are needed for the thrust asked for. This mirrors the real vehicle shutting engines down late in the burn, because three Raptors at minimum throttle cannot hover.
 
@@ -79,7 +79,7 @@ Mobile layout (the "one stick" option):
 - **Right thumb: throttle slider.** Zone marks show where the second and third engines come in.
 - **Bottom centre:** camera, speed (1× / ½× / ¼×) and menu.
 
-Keyboard: WASD stick, Shift/X throttle, Space engines off/on, C or 1–5 cameras, T slow motion, R restart, Esc menu.
+Keyboard: WASD stick, Shift/X throttle, Space engines off/on, C or 1–5 cameras, T slow motion, R restart, Esc pause.
 
 ## Flight computer (`src/sim/guidance.ts`)
 

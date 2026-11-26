@@ -3,15 +3,22 @@ import { create } from 'zustand';
 import { MODES, type ModeId } from '../sim/modes';
 import type { Outcome } from '../sim/outcome';
 import { Simulation } from '../sim/simulation';
+import { input } from './input';
 import { screenMachine } from './screen';
 
 export const CAMERAS = ['Chase', 'Target', 'Onboard', 'Engines', 'Ground'] as const;
 const screen = createActor(screenMachine).start();
 export type Screen = ReturnType<typeof screen.getSnapshot>['value'];
 /** The screen after an event, so the store can set it together with what changed (one update, not two). */
-const next = (type: 'START' | 'MENU' | 'FINISH') => {
+const next = (type: 'START' | 'MENU' | 'RESUME' | 'FINISH') => {
   screen.send({ type });
   return screen.getSnapshot().value;
+};
+/** Runs the flight only while it is on screen; a thumb lifted under the menu does not stay on the stick. */
+const show = (s: Screen, sim: Simulation) => {
+  sim.running = s === 'flying';
+  input.touch.x = input.touch.y = 0;
+  return { screen: s };
 };
 
 const savedMode = (): ModeId => {
@@ -30,7 +37,9 @@ interface GameState {
   camera: number;
   outcome: Outcome | null;
   start: (mode?: ModeId) => void;
+  /** Pauses a flight under the menu, or after one, goes back to the menu. */
   openMenu: () => void;
+  resume: () => void;
   finish: (o: Outcome) => void;
   setCamera: (i: number) => void;
 }
@@ -50,10 +59,8 @@ export const useGame = create<GameState>((set, get) => ({
     sim.runGuide();
     set({ modeId, sim, outcome: null, screen: next('START') });
   },
-  openMenu: () => {
-    get().sim.running = false;
-    set({ screen: next('MENU') });
-  },
+  openMenu: () => set(show(next('MENU'), get().sim)),
+  resume: () => set(show(next('RESUME'), get().sim)),
   finish: (outcome) => set({ outcome, screen: next('FINISH') }),
   setCamera: (i) => set({ camera: (i + CAMERAS.length) % CAMERAS.length }),
 }));
