@@ -1,6 +1,6 @@
 import { Matrix4, Quaternion, Vector3 } from 'three';
 import type { SiteWorld } from './world';
-import { desiredRates, updateReference, type Law, type Reference } from './control';
+import { desiredRates, type Law, type Reference } from './control';
 import {
   DRY_MASS, FLAP_GAIN, FLAP_RATE, G0, GIMBAL_MAX, HALF, LENGTH, MIN_THROTTLE, RADIUS,
   RAPTOR_MDOT, RAPTOR_THRUST, RCS_TORQUE, RHO0, SCALE_HEIGHT, SL_ENGINES, SPIN_DOWN_S, SPIN_UP_S,
@@ -36,13 +36,18 @@ export interface ShipState {
   /** Stick, -1..1. x = lateral (right +), y = pitch (forward/nose-down +). */
   inp: { x: number; y: number };
   spool: number; // 0..1 engine spin-up
-  /** Which attitude the fly-by-wire flies the stick against (latched: belly → flip → upright). */
+  /** Which attitude the fly-by-wire flies the stick against (decided by the flight machine, flight.ts). */
   ref: Reference;
+  /** Engines the propellant feed can supply (flight.ts propulsion region). */
+  available: number;
   flaps: number[]; // fold angle per FLAPS entry, rad
   // Derived each step (read by HUD, visuals and guidance)
   engines: number; // lit engine count
   perEngine: number; // throttle per lit engine
   thrust: number; // N
+  /** Dynamic pressure on the whole vehicle, and on its side only (crossflow), Pa. */
+  qbar: number;
+  qbarSide: number;
   /** Specific force (thrust and aerodynamics per unit mass, without gravity), world m/s². Where the propellant settles from. */
   accel: Vector3;
   gimbal: { x: number; z: number }; // rad, for visuals
@@ -54,6 +59,8 @@ export interface ShipState {
 export interface Env {
   law: Law;
   wind: [number, number, number];
+  /** Reports the tilt (deg) and whether the engines are lit, and returns the attitude to fly against. */
+  attitude: (tilt: number, lit: boolean) => Reference;
 }
 
 export function createShip(propellant: number): ShipState {
@@ -73,10 +80,13 @@ export function createShip(propellant: number): ShipState {
     inp: { x: 0, y: 0 },
     spool: 0,
     ref: 'belly',
+    available: SL_ENGINES,
     flaps: FLAPS.map(() => FLAP_NEUTRAL),
     engines: 0,
     perEngine: 0,
     thrust: 0,
+    qbar: 0,
+    qbarSide: 0,
     accel: new Vector3(),
     gimbal: { x: 0, z: 0 },
     ctrl: { x: 0, z: 0 },
@@ -130,8 +140,8 @@ export function physStep(s: ShipState, dt: number, env: Env, world: SiteWorld) {
   const on = s.thr > THROTTLE_OFF && s.prop > 0;
   s.spool = on ? Math.min(1, s.spool + dt / SPIN_UP_S) : Math.max(0, s.spool - dt / SPIN_DOWN_S);
   const req = s.thr * SL_ENGINES;
-  let n = clamp(Math.ceil(req - 1e-6), 1, SL_ENGINES);
-  let per = Math.max(MIN_THROTTLE, req / n);
+  let n = clamp(Math.ceil(req - 1e-6), 1, s.available);
+  let per = clamp(req / n, MIN_THROTTLE, 1);
   if (s.spool <= 0) { n = 0; per = 0; }
   const T = n * per * RAPTOR_THRUST * s.spool;
   s.engines = n; s.perEngine = per; s.thrust = T;
@@ -139,12 +149,14 @@ export function physStep(s: ShipState, dt: number, env: Env, world: SiteWorld) {
 
   // --- attitude control: flaps (scale with dynamic pressure) + gimbal (scales with thrust) + RCS
   const qd = 0.5 * rho * vpm * vpm;
+  s.qbarSide = qd;
+  s.qbar = 0.5 * rho * VR.lengthSq();
   const aF = qd * FLAP_GAIN;
   const aG = T * Math.sin(GIMBAL_MAX) * HALF;
   const avail = aF + aG + RCS_TORQUE;
   const Ip = m * (LENGTH * LENGTH / 12 + RADIUS * RADIUS / 4);
   const Ir = (m * RADIUS * RADIUS) / 2;
-  updateReference(s, (Math.acos(clamp(A.y, -1, 1)) * 180) / Math.PI);
+  s.ref = env.attitude((Math.acos(clamp(A.y, -1, 1)) * 180) / Math.PI, s.thr > THROTTLE_OFF && s.spool > 0.3);
   const r = desiredRates(s, env.law, RATES);
   const tx = clamp(Ip * 3 * (r.x - s.w.x), -avail, avail);
   const tz = clamp(Ip * 3 * (r.z - s.w.z), -avail, avail);

@@ -1,5 +1,5 @@
 import { Vector3 } from 'three';
-import { MAX_RATE, MAX_TILT, THROTTLE_OFF } from './constants';
+import { MAX_RATE, MAX_TILT } from './constants';
 import { bodyAxes, type ShipState } from './physics';
 
 /**
@@ -17,8 +17,6 @@ export type Reference = 'belly' | 'flip' | 'upright';
 
 export const BELLY_PITCH = (25 * Math.PI) / 180;
 const KP = 1.1; // attitude error to rate, 1/s
-const UPRIGHT_AT = 20; // deg tilt where the flip hands over to the upright law
-const FLIP_STARTED = 78; // deg tilt below which (engines lit) the flip is under way
 
 const clamp = (v: number, a: number, b: number) => Math.min(b, Math.max(a, v));
 const ax = { x: new Vector3(), y: new Vector3(), z: new Vector3() };
@@ -29,14 +27,6 @@ const N = new Vector3(), H = new Vector3(), AXIS = new Vector3(), T1 = new Vecto
 export function inGate(x: number, y: number, r = 1) {
   const l = Math.hypot(x, y);
   return l > r ? { x: (x / l) * r, y: (y / l) * r } : { x, y };
-}
-
-/** Advances the latched reference (belly → flip → upright) from the current state. */
-export function updateReference(s: ShipState, tiltDeg: number) {
-  const lit = s.thr > THROTTLE_OFF && s.spool > 0.3;
-  if (s.ref === 'belly' && lit && tiltDeg < FLIP_STARTED) s.ref = 'flip';
-  if (s.ref !== 'upright' && tiltDeg < UPRIGHT_AT) s.ref = 'upright';
-  if (s.ref === 'upright' && tiltDeg > 60) s.ref = 'flip';
 }
 
 /** Nose direction (world) for an upright tilt command, in the Ship's roll-held body frame. */
