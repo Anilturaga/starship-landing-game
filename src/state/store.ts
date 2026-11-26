@@ -1,10 +1,18 @@
+import { createActor } from 'xstate';
 import { create } from 'zustand';
 import { MODES, type ModeId } from '../sim/modes';
 import type { Outcome } from '../sim/outcome';
 import { Simulation } from '../sim/simulation';
+import { screenMachine } from './screen';
 
 export const CAMERAS = ['Chase', 'Target', 'Onboard', 'Engines', 'Ground'] as const;
-export type Screen = 'menu' | 'flying' | 'ended';
+const screen = createActor(screenMachine).start();
+export type Screen = ReturnType<typeof screen.getSnapshot>['value'];
+/** The screen after an event, so the store can set it together with what changed (one update, not two). */
+const next = (type: 'START' | 'MENU' | 'FINISH') => {
+  screen.send({ type });
+  return screen.getSnapshot().value;
+};
 
 const savedMode = (): ModeId => {
   try {
@@ -40,12 +48,13 @@ export const useGame = create<GameState>((set, get) => ({
     const sim = new Simulation(MODES[modeId]);
     sim.running = true;
     sim.runGuide();
-    set({ modeId, sim, screen: 'flying', outcome: null });
+    set({ modeId, sim, outcome: null, screen: next('START') });
   },
   openMenu: () => {
     get().sim.running = false;
-    set({ screen: 'menu' });
+    set({ screen: next('MENU') });
   },
-  finish: (outcome) => set({ outcome, screen: 'ended' }),
+  finish: (outcome) => set({ outcome, screen: next('FINISH') }),
   setCamera: (i) => set({ camera: (i + CAMERAS.length) % CAMERAS.length }),
 }));
+

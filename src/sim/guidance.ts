@@ -3,6 +3,7 @@ import {
   ARM_REACH, ARM_Y, ARMS, CATCH, DRY_MASS, FLIP_ALT, G0, HALF, MAX_TILT, PIN_OFFSET, RADIUS, RAPTOR_THRUST, shoreX, SL_ENGINES, THROTTLE_OFF,
 } from './constants';
 import { BELLY_PITCH, inGate } from './control';
+import type { GuideTick } from './flight';
 import { bodyAxes, deltaVLeft, type ShipState } from './physics';
 
 /**
@@ -46,7 +47,7 @@ export interface Guide {
 export const createGuide = (): Guide => ({ phase: 'glide', stick: null, throttle: null, abort: null });
 
 /** What the computer looks at, predicted LEAD seconds ahead. */
-interface View {
+export interface View {
   A: Vector3; BX: Vector3; BZ: Vector3;
   pin: Vector3; base: Vector3; vel: Vector3; vh: Vector3;
   vs: number; tilt: number; alt: number; hArm: number; mass: number; lit: boolean;
@@ -76,9 +77,8 @@ function look(s: ShipState): View {
   };
 }
 
-/** Latches an abort when a catch is no longer possible: the Gulf if in reach, otherwise open ground. */
-function assess(s: ShipState, v: View, g: Guide, belly: boolean) {
-  if (g.abort) return;
+/** Whether a catch is still possible, and if not, where to go instead: the Gulf if in reach, otherwise open ground. */
+function assess(s: ShipState, v: View, belly: boolean): Abort | null {
   const dTower = Math.hypot(CATCH.x - v.pin.x, CATCH.z - v.pin.z);
   const dvNeed = v.vel.length() + 9.81 * clamp(v.hArm / 15, 6, 40) * 0.8 + dTower * 0.04;
   const glide = (Math.max(0, v.alt - FLIP_ALT) / Math.max(v.vs, 1)) * 30 + 120;
@@ -89,12 +89,12 @@ function assess(s: ShipState, v: View, g: Guide, belly: boolean) {
   // upright: time left on the descent profile (dh/dt = 2√h gives √h seconds) plus the creep near the arms,
   // flown at the 7 m/s approach speed
   else if (s.ref === 'upright' && dTower > 20 + 7 * (Math.sqrt(Math.max(0, v.hArm)) + 15)) why = 'Too far from the tower to reach it this low.';
-  if (!why) return;
+  if (!why) return null;
   const dOcean = Math.max(0, shoreX(v.pin.z) + 150 - v.pin.x);
   let reach: number;
   if (belly) reach = glide + 250;
   else { const t = Math.max(3, v.base.y / Math.max(v.vs, 4)); reach = Math.max(0, v.vel.x * t) + 0.5 * 2.5 * t * t; }
-  g.abort = { why, mode: dOcean < reach ? 'ocean' : 'clear' };
+  return { why, mode: dOcean < reach ? 'ocean' : 'clear' };
 }
 
 /** Lined up between the open arms, where the hull can go below their top without touching them. */
@@ -152,32 +152,43 @@ function descend(v: View, g: Guide, d: number, dir: Vector3) {
   };
 }
 
-/** Updates `g` with the next suggested inputs. Called ten times a second. */
-export function updateGuide(s: ShipState, g: Guide) {
+/**
+ * What the flight computer sees on one of its ticks (ten a second): what the flight machine (flight.ts) needs
+ * to decide its phase and whether to abort, and the view `steer` works the cues out from.
+ */
+export function observe(s: ShipState): { tick: GuideTick; view: View } {
   const v = look(s);
-  const belly = s.ref === 'belly' && !v.lit;
-  assess(s, v, g, belly);
+  return {
+    view: v,
+    tick: {
+      upright: s.ref === 'upright',
+      lit: v.lit,
+      spun: v.lit && s.spool > 0.3,
+      low: v.alt < FLIP_ALT + 60,
+      lost: assess(s, v, s.ref === 'belly' && !v.lit),
+    },
+  };
+}
+
+/** Sets the cues in `g` for the phase and abort the flight machine decided. */
+export function steer(v: View, g: Guide) {
   const { d, dir } = targetOf(v, g);
   let stick: { x: number; y: number };
   g.throttle = null;
-
-  if (s.ref === 'upright') {
-    g.phase = 'descend';
+  if (g.phase === 'descend') {
     const r = descend(v, g, d, dir);
     stick = r.stick;
     g.throttle = r.throttle;
-  } else if (v.lit || v.alt < FLIP_ALT + 60) {
+  } else if (g.phase === 'glide') {
+    stick = glide(v, g, d, dir);
+  } else {
     // light the Raptors, then hold the stick back until the Ship is upright
-    const spun = v.lit && s.spool > 0.3;
-    g.phase = spun ? 'flip' : 'light';
+    const spun = g.phase === 'flip';
     stick = { x: 0, y: spun ? -GATE : 0 };
     const h = Math.max(1, g.abort ? v.base.y : v.hArm);
     const aReq = (v.vs * v.vs) / (2 * h);
     // minimum thrust until the nose is well up, or the burn would push the Ship forward
     g.throttle = aReq > 3 && spun && v.tilt < 45 ? clamp(((aReq + G0) * v.mass) / MAX_THRUST, 0.15, 1) : 0.15;
-  } else {
-    g.phase = 'glide';
-    stick = glide(v, g, d, dir);
   }
   g.stick = inGate(stick.x, stick.y, GATE);
 }

@@ -7,11 +7,14 @@ let ready: Promise<void> | null = null;
 export const initPhysics = () => (ready ??= RAPIER.init());
 
 /**
- * What the Ship touched in a step. `arms`: a pin came down on a chopstick with both arms closed under the pins;
+ * What the Ship touched in a step. The tower: its `mast`, the arm `carriage` and the Ship `qd-arm`
+ * (quick-disconnect). `arms`: a pin came down on a chopstick with both arms closed under the pins;
  * `arm-open`: a pin came down on one arm while the other was still open; `hull-arm`: the hull struck a chopstick.
  */
-export type Hit = 'tower' | 'arms' | 'arm-open' | 'hull-arm' | 'mount' | 'surface';
-type Fixed = 'tower' | 'arm' | 'mount' | 'surface';
+export type Hit = 'mast' | 'carriage' | 'qd-arm' | 'arms' | 'arm-open' | 'hull-arm' | 'mount' | 'surface';
+type Fixed = Exclude<Hit, 'arms' | 'arm-open' | 'hull-arm'> | 'arm';
+/** What the chopsticks are doing, as decided by the flight machine (flight.ts). */
+export type ArmCommand = 'open' | 'closing' | 'holding';
 
 // collision groups: (membership << 16) | filter
 const SHIP = 1, STRUCT = 2;
@@ -19,7 +22,7 @@ const group = (member: number, filter: number) => (member << 16) | filter;
 const C = () => RAPIER.ColliderDesc;
 
 const ZERO = { x: 0, y: 0, z: 0 }, IDENT = { x: 0, y: 0, z: 0, w: 1 };
-const qInv = new Quaternion(), wv = new Vector3(), axis = new Vector3(), pin = new Vector3();
+const qInv = new Quaternion(), wv = new Vector3(), axis = new Vector3();
 
 /** Top of the chopsticks' rails, where the pins rest. */
 export const ARM_TOP = ARM_Y + 0.3;
@@ -62,9 +65,9 @@ export class SiteWorld {
       return c;
     };
     const { x: tx, width: tw, height: th } = TOWER;
-    fixed(C().cuboid(tw / 2, th / 2 + 1, tw / 2).setTranslation(tx, th / 2 + 1, 0), 'tower');
-    fixed(C().cuboid(tw / 2 + 1.8, 5.5, tw / 2 + 1.8).setTranslation(tx, ARM_Y - 4, 0), 'tower'); // arm carriage
-    fixed(C().cuboid(1.5, 2, 7).setTranslation(tx + 2.5, 114.5, -tw / 2 - 7.5), 'tower'); // Ship quick-disconnect arm
+    fixed(C().cuboid(tw / 2, th / 2 + 1, tw / 2).setTranslation(tx, th / 2 + 1, 0), 'mast');
+    fixed(C().cuboid(tw / 2 + 1.8, 5.5, tw / 2 + 1.8).setTranslation(tx, ARM_Y - 4, 0), 'carriage');
+    fixed(C().cuboid(1.5, 2, 7).setTranslation(tx + 2.5, 114.5, -tw / 2 - 7.5), 'qd-arm');
     fixed(C().cylinder(MOUNT.top / 2, MOUNT.radius).setTranslation(CATCH.x, MOUNT.top / 2, CATCH.z), 'mount');
     fixed(C().cuboid(40000, 50, 40000).setTranslation(0, -50, 0), 'surface');
     for (const side of [-1, 1]) this.armCol.push(fixed(armShape(side), 'arm'));
@@ -82,27 +85,21 @@ export class SiteWorld {
   }
 
   /**
-   * The arms wait open, close around the Ship once its pins are just above them and between the arms,
-   * stopping short of the hull, and open again if it leaves.
+   * Moves the chopsticks one step toward what `cmd` asks: wait open, close around the hull below the pins
+   * (stopping short of it), or hold where they are once the pins are level with them.
    */
-  private moveArms(s: { pos: Vector3; q: Quaternion }) {
+  moveArms(s: { pos: Vector3; q: Quaternion }, cmd: ArmCommand) {
     axis.set(0, 1, 0).applyQuaternion(s.q);
-    pin.copy(s.pos).addScaledVector(axis, PIN_OFFSET);
-    const above = pin.y - ARM_TOP;
     // where the hull's axis crosses the top and bottom of the arms: they close around the body below the pins
     const at = (y: number) => s.pos.z + axis.z * Math.max(-HALF, Math.min(PIN_OFFSET, (y - s.pos.y) / Math.max(0.2, axis.y)));
     const zTop = at(ARM_TOP), zBot = at(ARM_Y - 7);
-    const over = pin.x > ARM_REACH.x0 + RADIUS && pin.x < ARM_REACH.x1 + 1 && Math.abs(pin.z) < ARMS.open - ARMS.clear;
-    const close = over && above > 0.2 && above < 30;
-    const hold = over && above <= 0.2; // pins at or below the arms: never close onto the hull
     const a = this.arms, step = ARMS.speed * STEP;
     for (let i = 0; i < 2; i++) {
       const side = i ? 1 : -1;
       const hull = side > 0 ? Math.max(zTop, zBot) : Math.min(zTop, zBot);
-      const want = close ? hull + side * ARMS.clear : hold ? a.face[i] : side * ARMS.open;
-      const d = want - a.face[i];
-      a.face[i] += Math.max(-step, Math.min(step, d));
-      a.closed[i] = close && Math.abs(want - a.face[i]) < 0.1;
+      const want = cmd === 'closing' ? hull + side * ARMS.clear : cmd === 'holding' ? a.face[i] : side * ARMS.open;
+      a.face[i] += Math.max(-step, Math.min(step, want - a.face[i]));
+      a.closed[i] = cmd === 'closing' && Math.abs(want - a.face[i]) < 0.1;
     }
     this.placeArms();
   }
@@ -115,7 +112,6 @@ export class SiteWorld {
     s: { pos: Vector3; vel: Vector3; q: Quaternion; w: Vector3 },
     force: Vector3, torque: Vector3, mass: number, inertia: Vector3,
   ) {
-    this.moveArms(s);
     const b = this.body;
     b.setAdditionalMassProperties(mass, ZERO, inertia, IDENT, true);
     b.setTranslation(s.pos, true);

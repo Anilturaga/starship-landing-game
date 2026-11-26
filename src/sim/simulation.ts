@@ -1,17 +1,26 @@
-import { ARM_Y, CATCH, PIN_HALF, STEP } from './constants';
-import { createGuide, updateGuide, type Guide } from './guidance';
-import type { Mode } from './modes';
-import { judge, pinPos, type Outcome } from './outcome';
-import { createShip, physStep, type ShipState } from './physics';
 import { Vector3 } from 'three';
+import { createActor } from 'xstate';
+import { ARM_Y, CATCH, PIN_HALF, SL_ENGINES, STEP } from './constants';
+import { attitudeMachine, computerMachine, flightMachine } from './flight';
+import { createGuide, observe, steer, type Guide } from './guidance';
+import type { Mode } from './modes';
+import { measure, outcomeOf, pinPos, type Outcome } from './outcome';
+import { createShip, physStep, type Env, type ShipState } from './physics';
 import { ARM_TOP, SiteWorld } from './world';
+
+/** The deepest active state, as a dotted path (e.g. 'crash.tower.mast'). */
+function leaf(v: unknown): string {
+  if (typeof v === 'string') return v;
+  const [k, sub] = Object.entries(v as Record<string, unknown>)[0];
+  return `${k}.${leaf(sub)}`;
+}
 
 const GUIDE_PERIOD = 0.1; // s of sim time between flight-computer updates
 export const SPEEDS = [1, 0.5, 0.25] as const;
 
 /**
- * Owns one flight: fixed-step physics, the flight computer, contact checks and game speed.
- * Rendering and UI read from it; they never change the physics directly.
+ * Owns one flight: fixed-step physics, the machines that take every discrete decision (flight.ts),
+ * the flight computer's cues and game speed. Rendering and UI read from it; they never change the physics directly.
  */
 export class Simulation {
   readonly mode: Mode;
@@ -29,6 +38,11 @@ export class Simulation {
   autoSlow = false;
   timeScale = 1;
 
+  /** The machines that take every discrete decision of this flight (flight.ts); no computer in Expert. */
+  readonly attitude = createActor(attitudeMachine).start();
+  readonly computer;
+  readonly flight;
+  private env: Env;
   private acc = 0;
   private guideClock = 0;
   private pin = new Vector3();
@@ -36,6 +50,16 @@ export class Simulation {
   constructor(mode: Mode) {
     this.mode = mode;
     this.ship = createShip(mode.propellant);
+    this.computer = mode.guides || mode.autoThrottle ? createActor(computerMachine).start() : null;
+    this.flight = createActor(flightMachine, { input: { limits: mode.limits } }).start();
+    this.env = {
+      law: mode.law,
+      wind: mode.wind,
+      attitude: (tilt, lit) => {
+        this.attitude.send({ type: 'ATTITUDE', tilt, lit });
+        return this.attitude.getSnapshot().value;
+      },
+    };
   }
 
   /** Throttle the player asks for; ignored when the flight computer owns the throttle. */
@@ -51,17 +75,22 @@ export class Simulation {
     this.speedTouched = true;
   }
 
-  /** One fixed physics step plus contact checks and (periodically) the flight computer. */
+  /** One fixed physics step; the flight machine then decides on what it measured. */
   step() {
     if (this.outcome) return;
     const s = this.ship;
-    const hits = physStep(s, STEP, { law: this.mode.law, wind: this.mode.wind }, this.world);
-    if (s.prop <= 0) s.thr = 0;
-    const out = judge(s, hits, this.mode.limits);
-    if (out) {
-      this.outcome = out;
+    this.world.moveArms(s, this.flight.getSnapshot().value.arms);
+    const m = measure(s, physStep(s, STEP, this.env, this.world));
+    this.flight.send({ type: 'STEP', m });
+    const { propulsion, outcome } = this.flight.getSnapshot().value;
+    // guidance still sizes its throttle for three engines: with one out, the most it gets is two thirds
+    s.available = propulsion === 'nominal' ? SL_ENGINES : SL_ENGINES - 1;
+    if (propulsion === 'starved') s.thr = 0;
+    if (outcome !== 'flying') {
+      const cause = leaf(outcome);
+      this.outcome = outcomeOf(cause, m, this.mode.limits, s.t, propulsion === 'starved');
       s.thr = 0;
-      if (out.kind === 'caught') s.pos.y += ARM_TOP + PIN_HALF - pinPos(s, this.pin).y; // rest the pins on the arms
+      if (cause === 'caught') s.pos.y += ARM_TOP + PIN_HALF - pinPos(s, this.pin).y; // rest the pins on the arms
       s.vel.set(0, 0, 0);
       s.w.set(0, 0, 0);
       return;
@@ -73,16 +102,24 @@ export class Simulation {
     }
   }
 
-  /** Runs the flight computer now. Also drives the throttle in modes where it owns it. */
+  /** Runs the flight computer now: its machine decides the phase and any abort, then it works out the cues. */
   runGuide() {
-    const needed = this.mode.guides || this.mode.autoThrottle;
-    if (!needed) return;
-    updateGuide(this.ship, this.guide);
-    if (this.mode.autoThrottle) this.ship.thr = this.guide.throttle ?? 0;
+    if (!this.computer) return; // Expert: no flight computer
+    const { tick, view } = observe(this.ship);
+    this.computer.send({ type: 'GUIDE', tick });
+    const { value, context } = this.computer.getSnapshot();
+    const g = this.guide;
+    g.phase = value.phase;
+    g.abort = value.abort === 'none' ? null : { mode: value.abort, why: context.why! };
+    steer(view, g);
+    if (this.mode.autoThrottle) this.ship.thr = g.throttle ?? 0;
   }
 
-  /** Release the Rapier world (WebAssembly memory). */
+  /** Stop the machines and release the Rapier world (WebAssembly memory). */
   dispose() {
+    this.attitude.stop();
+    this.computer?.stop();
+    this.flight.stop();
     this.world.free();
   }
 

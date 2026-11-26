@@ -23,6 +23,14 @@ export const SPIN_UP_S = 1.5;
 export const SPIN_DOWN_S = 0.35;
 /** Throttle requests at or below this are "engines off". */
 export const THROTTLE_OFF = 0.03;
+/** Below this much propellant the header tanks can no longer feed all three engines, and one flames out. */
+export const ENGINE_OUT_PROP = 2000; // kg
+
+// Structure
+/** Dynamic pressure the airframe survives at any attitude, Pa (about 220 m/s at sea level). */
+export const BREAKUP_Q = 30_000;
+/** Crossflow dynamic pressure the belly-flop is built for, with margin, Pa (broadside at about 140 m/s at sea level). */
+export const BREAKUP_Q_BROADSIDE = 12_000;
 
 // Attitude control
 export const RCS_TORQUE = 8e5; // N·m, small constant authority
